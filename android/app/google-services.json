@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "314583170778",
+    "project_id": "diet-workout-app",
+    "storage_bucket": "diet-workout-app.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:314583170778:android:25c8611736b5d4272c2fe3",
+        "android_client_info": {
+          "package_name": "com.example.flutter_application_1"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDk5Fx6-f82DVRKmONAxc6-z1Lklm33Tq8"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
