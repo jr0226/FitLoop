@@ -50,7 +50,7 @@ class _WorkoutTabState extends State<WorkoutTab> {
     if (query.trim().isEmpty) return;
     setState(() => _isLoading = true);
     
-    const String apiKey = '249abca3c2msh05e0221ea16d014p145f8ajsnf6508b87260f'; 
+    const String apiKey = 'YOUR_RAPIDAPI_KEY_HERE'; // Replace with
     
     try {
       final url = Uri.parse('https://exercisedb.p.rapidapi.com/exercises/name/${query.toLowerCase()}?limit=20');

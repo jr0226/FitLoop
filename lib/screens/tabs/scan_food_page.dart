@@ -24,7 +24,7 @@ class _CameraTabState extends State<CameraTab>
   // Replace with your actual Gemini API key
   final _model = GenerativeModel(
     model: 'gemini-3-flash-preview',
-    apiKey: 'AQ.Ab8RN6K6De9MX3EdbrjPrjVPuqN3FSs8qa3_r4cKONfS2c31OA',
+    apiKey: 'YOUR_GEMINI_API_KEY_HERE',
   );
 
   @override

@@ -318,7 +318,7 @@ class _AddFoodPageState extends State<AddFoodPage> {
   final TextEditingController _searchCtrl = TextEditingController();
   bool _isSearching = false;
 
-  final String apiKey = "8alHG9q8gsGcxiDeckmVdPI0Crn8ScxrgKnYA0z7";
+  final String apiKey = "YOUR_NINJAS_API_KEY_HERE"; // Replace with your actual API key from https://api-ninjas.com/api/food
 
   // --- 1. SEARCH FOOD VIA API ---
   Future<void> _searchFoodApi(String query) async {
