@@ -1,18 +1,19 @@
 import 'package:flutter/material.dart';
 import 'dart:async';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+
 // ==========================================
-// 10. ACTIVE WORKOUT SESSION PAGE
+// 10. ACTIVE WORKOUT SESSION PAGE (ROUTINE ENGINE)
 // ==========================================
 class ActiveWorkoutPage extends StatefulWidget {
-  final Map<String, dynamic> exerciseData; // The exercise we are doing
-  final int totalExercises;
-  final int currentExerciseIndex;
+  final String workoutName; // e.g., "Chest Day", "Full Body Blast"
+  final List<Map<String, dynamic>> routine; // Array of exercises
 
   const ActiveWorkoutPage({
     super.key,
-    required this.exerciseData,
-    required this.totalExercises,
-    required this.currentExerciseIndex,
+    required this.workoutName,
+    required this.routine,
   });
 
   @override
@@ -20,6 +21,10 @@ class ActiveWorkoutPage extends StatefulWidget {
 }
 
 class _ActiveWorkoutPageState extends State<ActiveWorkoutPage> {
+  // --- WORKOUT STATE ---
+  int _currentIndex = 0;
+  List<Map<String, dynamic>> _allCompletedExercises = []; // Stores the final data to push to Firebase
+
   // --- TIMERS ---
   Timer? _sessionTimer;
   int _sessionSeconds = 0;
@@ -27,29 +32,33 @@ class _ActiveWorkoutPageState extends State<ActiveWorkoutPage> {
   Timer? _restTimer;
   int _restSeconds = 0;
   bool _isResting = false;
-  final int _defaultRestTime = 60; // Default 60s rest
+  final int _defaultRestTime = 60;
 
-  // --- LOGGING DATA ---
-  // Mocking "Previous Session" data for "Progressive Overload"
-  final List<Map<String, dynamic>> _sets = [
-    {"set": 1, "prev": "20kg x 10", "weight": "20", "reps": "10", "done": false},
-    {"set": 2, "prev": "20kg x 10", "weight": "20", "reps": "10", "done": false},
-    {"set": 3, "prev": "20kg x 8",  "weight": "20", "reps": "8",  "done": false},
-  ];
-
+  // Current sets for the currently active exercise
+  List<Map<String, dynamic>> _currentSets = [];
   final TextEditingController _noteController = TextEditingController();
 
   @override
   void initState() {
     super.initState();
     _startSessionTimer();
+    _initializeSetsForCurrentExercise();
   }
 
   @override
   void dispose() {
     _sessionTimer?.cancel();
     _restTimer?.cancel();
+    _noteController.dispose();
     super.dispose();
+  }
+
+  void _initializeSetsForCurrentExercise() {
+    // Reset the sets when we move to a new exercise
+    _currentSets = [
+      {"set": 1, "prev": "-", "weight": "", "reps": "", "done": false},
+    ];
+    _noteController.clear();
   }
 
   // --- TIMER LOGIC ---
@@ -69,7 +78,7 @@ class _ActiveWorkoutPageState extends State<ActiveWorkoutPage> {
       if (_restSeconds > 0) {
         setState(() => _restSeconds--);
       } else {
-        _skipRest(); // Timer finished
+        _skipRest();
       }
     });
   }
@@ -86,40 +95,117 @@ class _ActiveWorkoutPageState extends State<ActiveWorkoutPage> {
     setState(() => _isResting = false);
   }
 
-  // --- FORMATTERS ---
   String _formatTime(int seconds) {
     int m = seconds ~/ 60;
     int s = seconds % 60;
     return "${m.toString().padLeft(2, '0')}:${s.toString().padLeft(2, '0')}";
   }
 
-  // --- NAVIGATION LOGIC ---
+  // --- NAVIGATION & SAVING ---
   void _minimize() {
-    // In a real app, this would minimize to a floating bubble.
-    // For FYP, we pop but show a message.
     Navigator.pop(context); 
-    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Workout minimized (Session continues in background)")));
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text("Workout minimized"))
+    );
   }
 
-  void _finishWorkout() {
-    // TODO: Save all logs to Firestore here
-    Navigator.pop(context);
-    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Workout Complete! Great Job! 🎉")));
+  void _saveCurrentExerciseData() {
+    // Save the current exercise's sets into our master list
+    final completedSets = _currentSets.where((s) => s['done'] == true).toList();
+    if (completedSets.isNotEmpty) {
+      _allCompletedExercises.add({
+        'exerciseName': widget.routine[_currentIndex]['name'],
+        'category': widget.routine[_currentIndex]['category'] ?? 'General',
+        'notes': _noteController.text,
+        'sets': completedSets.map((s) => {
+          'set': s['set'],
+          'weight': double.tryParse(s['weight'].toString()) ?? 0.0,
+          'reps': int.tryParse(s['reps'].toString()) ?? 0,
+        }).toList()
+      });
+    }
+  }
+
+  void _nextExercise() {
+    _saveCurrentExerciseData();
+    setState(() {
+      _currentIndex++;
+      _initializeSetsForCurrentExercise();
+      _skipRest(); // Cancel any active rest timer
+    });
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text("Loaded: ${widget.routine[_currentIndex]['name']}"))
+    );
+  }
+
+  Future<void> _finishWorkout() async {
+    _saveCurrentExerciseData(); // Save the final exercise
+    
+    if (_allCompletedExercises.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text("No sets completed. Workout discarded."))
+      );
+      Navigator.pop(context);
+      return;
+    }
+
+    showDialog(
+      context: context, 
+      barrierDismissible: false, 
+      builder: (c) => const Center(child: CircularProgressIndicator(color: Colors.teal))
+    );
+
+    try {
+      final user = FirebaseAuth.instance.currentUser!;
+      final int caloriesBurned = (_sessionSeconds / 60.0 * 5.0).round();
+
+      await FirebaseFirestore.instance
+          .collection('users')
+          .doc(user.uid)
+          .collection('workout_logs')
+          .add({
+            'routineName': widget.workoutName,
+            'durationSeconds': _sessionSeconds,
+            'caloriesBurned': caloriesBurned,
+            'exercises': _allCompletedExercises, // Array of all exercises done!
+            'timestamp': FieldValue.serverTimestamp(),
+          });
+
+      if (mounted) {
+        Navigator.pop(context); // Close dialog
+        Navigator.pop(context); // Close page
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text("Workout Complete! Burned ~$caloriesBurned kcal 🔥"))
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        Navigator.pop(context);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text("Error saving workout: $e"))
+        );
+      }
+    }
   }
 
   @override
   Widget build(BuildContext context) {
-    double progress = (widget.currentExerciseIndex + 1) / widget.totalExercises;
+    // Current exercise data
+    final currentExercise = widget.routine[_currentIndex];
+    double progress = (_currentIndex + 1) / widget.routine.length;
 
     return Scaffold(
-      // === APP BAR (Minimize / Cancel) ===
       appBar: AppBar(
         leading: IconButton(icon: const Icon(Icons.keyboard_arrow_down), onPressed: _minimize),
-        title: Text("Active Session  ${_formatTime(_sessionSeconds)}"),
+        title: Column(
+          children: [
+            Text(widget.workoutName, style: const TextStyle(fontSize: 14, color: Colors.grey)),
+            Text(_formatTime(_sessionSeconds), style: const TextStyle(fontWeight: FontWeight.bold)),
+          ],
+        ),
         actions: [
           TextButton(
             onPressed: () {
-              // Confirm Exit Dialog
               showDialog(context: context, builder: (c) => AlertDialog(
                 title: const Text("End Workout?"),
                 content: const Text("All unsaved progress will be lost."),
@@ -140,12 +226,11 @@ class _ActiveWorkoutPageState extends State<ActiveWorkoutPage> {
       
       body: Column(
         children: [
-          // === SCROLLABLE CONTENT ===
           Expanded(
             child: SingleChildScrollView(
               child: Column(
                 children: [
-                  // 1. VISUAL GUIDANCE & INFO
+                  // Visual Header
                   Container(
                     height: 200,
                     width: double.infinity,
@@ -153,53 +238,38 @@ class _ActiveWorkoutPageState extends State<ActiveWorkoutPage> {
                     child: Stack(
                       fit: StackFit.expand,
                       children: [
-                        Image.network(widget.exerciseData['image'], fit: BoxFit.cover, errorBuilder: (c,o,s)=>const Icon(Icons.image_not_supported, color: Colors.white)),
+                        Image.network(currentExercise['image'], fit: BoxFit.cover, errorBuilder: (c,o,s)=>const Icon(Icons.image_not_supported, color: Colors.white)),
                         Container(decoration: BoxDecoration(gradient: LinearGradient(colors: [Colors.transparent, Colors.black.withOpacity(0.8)], begin: Alignment.topCenter, end: Alignment.bottomCenter))),
                         Positioned(
                           bottom: 10, left: 15,
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              Text(widget.exerciseData['name'], style: const TextStyle(color: Colors.white, fontSize: 24, fontWeight: FontWeight.bold)),
-                              const Text("Target: Chest, Triceps, Shoulders", style: TextStyle(color: Colors.tealAccent, fontWeight: FontWeight.bold)), // Muscle Highlight
+                              Text(currentExercise['name'], style: const TextStyle(color: Colors.white, fontSize: 24, fontWeight: FontWeight.bold)),
+                              Text("Exercise ${_currentIndex + 1} of ${widget.routine.length}", style: const TextStyle(color: Colors.tealAccent, fontWeight: FontWeight.bold)),
                             ],
                           ),
                         ),
-                        // SUBSTITUTE BUTTON
-                        Positioned(
-                          top: 10, right: 10,
-                          child: ElevatedButton.icon(
-                            onPressed: () {
-                              ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Substitute: Machine Press selected")));
-                            }, 
-                            icon: const Icon(Icons.swap_horiz, size: 16), 
-                            label: const Text("Swap"),
-                            style: ElevatedButton.styleFrom(backgroundColor: Colors.black54, foregroundColor: Colors.white),
-                          ),
-                        )
                       ],
                     ),
                   ),
 
-                  // 2. TEXT INSTRUCTIONS (Expandable)
-                  const ExpansionTile(
-                    title: Text("Instructions & Form Cues"),
+                  ExpansionTile(
+                    title: const Text("Instructions & Form Cues"),
                     children: [
                       Padding(
-                        padding: EdgeInsets.all(16.0),
-                        child: Text("Keep your back flat against the bench. Lower the weight slowly to your chest, pause, and explode up. Do not lock your elbows at the top."),
+                        padding: const EdgeInsets.all(16.0),
+                        child: Text(currentExercise['desc'] ?? "Focus on the mind-muscle connection and maintain slow, controlled movements."),
                       )
                     ],
                   ),
-
                   const Divider(),
 
-                  // 3. THE LOGGING GRID (THE MEAT)
+                  // The Set Logger
                   Padding(
                     padding: const EdgeInsets.symmetric(horizontal: 16.0),
                     child: Column(
                       children: [
-                        // Header
                         Row(
                           children: const [
                             SizedBox(width: 30, child: Text("Set", style: TextStyle(fontWeight: FontWeight.bold, color: Colors.grey))),
@@ -211,8 +281,7 @@ class _ActiveWorkoutPageState extends State<ActiveWorkoutPage> {
                         ),
                         const SizedBox(height: 10),
                         
-                        // Dynamic Set Rows
-                        ..._sets.map((set) {
+                        ..._currentSets.map((set) {
                           bool isDone = set['done'];
                           return Container(
                             margin: const EdgeInsets.only(bottom: 10),
@@ -224,21 +293,19 @@ class _ActiveWorkoutPageState extends State<ActiveWorkoutPage> {
                             ),
                             child: Row(
                               children: [
-                                // Set Number
                                 SizedBox(width: 30, child: Center(child: Text("${set['set']}", style: const TextStyle(fontWeight: FontWeight.bold)))),
                                 
-                                // Previous Data
                                 Expanded(child: Center(child: Text(set['prev'], style: const TextStyle(color: Colors.grey, fontSize: 12)))),
                                 
-                                // Weight Input
                                 Expanded(
                                   child: Container(
                                     margin: const EdgeInsets.symmetric(horizontal: 4),
                                     height: 40,
                                     child: TextFormField(
-                                      initialValue: set['weight'],
+                                      initialValue: set['weight'].toString(),
                                       textAlign: TextAlign.center,
                                       keyboardType: TextInputType.number,
+                                      onChanged: (val) => set['weight'] = val,
                                       decoration: InputDecoration(
                                         contentPadding: const EdgeInsets.only(bottom: 10),
                                         filled: true,
@@ -249,15 +316,15 @@ class _ActiveWorkoutPageState extends State<ActiveWorkoutPage> {
                                   ),
                                 ),
                                 
-                                // Reps Input
                                 Expanded(
                                   child: Container(
                                     margin: const EdgeInsets.symmetric(horizontal: 4),
                                     height: 40,
                                     child: TextFormField(
-                                      initialValue: set['reps'],
+                                      initialValue: set['reps'].toString(),
                                       textAlign: TextAlign.center,
                                       keyboardType: TextInputType.number,
+                                      onChanged: (val) => set['reps'] = val,
                                       decoration: InputDecoration(
                                         contentPadding: const EdgeInsets.only(bottom: 10),
                                         filled: true,
@@ -268,16 +335,16 @@ class _ActiveWorkoutPageState extends State<ActiveWorkoutPage> {
                                   ),
                                 ),
                                 
-                                // Check Button
                                 SizedBox(
                                   width: 40,
                                   child: Checkbox(
                                     activeColor: Colors.teal,
                                     value: isDone,
                                     onChanged: (val) {
+                                      FocusScope.of(context).unfocus();
                                       setState(() {
                                         set['done'] = val;
-                                        if (val == true) _triggerRestTimer(); // AUTO TRIGGER REST
+                                        if (val == true) _triggerRestTimer(); 
                                       });
                                     },
                                   ),
@@ -287,11 +354,16 @@ class _ActiveWorkoutPageState extends State<ActiveWorkoutPage> {
                           );
                         }).toList(),
 
-                        // Add Set Button
                         TextButton.icon(
                           onPressed: () {
                             setState(() {
-                              _sets.add({"set": _sets.length + 1, "prev": "-", "weight": "-", "reps": "-", "done": false});
+                              _currentSets.add({
+                                "set": _currentSets.length + 1, 
+                                "prev": "-", 
+                                "weight": _currentSets.last['weight'], 
+                                "reps": _currentSets.last['reps'], 
+                                "done": false
+                              });
                             });
                           }, 
                           icon: const Icon(Icons.add), 
@@ -301,61 +373,58 @@ class _ActiveWorkoutPageState extends State<ActiveWorkoutPage> {
                     ),
                   ),
 
-                  // 4. NOTES
                   Padding(
                     padding: const EdgeInsets.all(16.0),
                     child: TextField(
                       controller: _noteController,
                       decoration: const InputDecoration(
                         labelText: "Exercise Notes",
-                        hintText: "e.g., Seat height 4, shoulder pain...",
+                        hintText: "e.g., Seat height 4, felt good...",
                         prefixIcon: Icon(Icons.edit_note),
                         border: OutlineInputBorder(),
                       ),
                     ),
                   ),
-                  
-                  // Spacer for the Rest Timer Panel
                   const SizedBox(height: 100), 
                 ],
               ),
             ),
           ),
 
-          // === BOTTOM NAVIGATION ===
+          // Bottom Navigation
           Container(
             padding: const EdgeInsets.all(16),
-            decoration: BoxDecoration(
+            decoration: const BoxDecoration(
               color: Colors.white,
-              boxShadow: [BoxShadow(color: Colors.black12, blurRadius: 10, offset: const Offset(0, -5))]
+              boxShadow: [BoxShadow(color: Colors.black12, blurRadius: 10, offset: Offset(0, -5))]
             ),
             child: Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                if (widget.currentExerciseIndex > 0)
+                if (_currentIndex > 0)
                   TextButton.icon(
-                    onPressed: () => Navigator.pop(context), 
+                    onPressed: () {
+                      setState(() {
+                        _currentIndex--;
+                        _initializeSetsForCurrentExercise(); // In a full app, you'd reload the saved sets here instead of resetting
+                      });
+                    }, 
                     icon: const Icon(Icons.arrow_back_ios, size: 16), 
                     label: const Text("Prev")
                   )
                 else 
-                  const SizedBox(width: 80), // Spacer
+                  const SizedBox(width: 80), 
 
-                // Finish or Next Button
-                if (widget.currentExerciseIndex < widget.totalExercises - 1)
+                if (_currentIndex < widget.routine.length - 1)
                   ElevatedButton.icon(
-                    onPressed: () {
-                      // Navigate to Next Exercise Logic (Demo: just pops for now)
-                      Navigator.pop(context);
-                      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Next Exercise Loaded...")));
-                    },
+                    onPressed: _nextExercise, // Loads the next exercise!
                     icon: const Icon(Icons.arrow_forward_ios, size: 16),
                     label: const Text("Next Exercise"),
                     style: ElevatedButton.styleFrom(backgroundColor: Colors.teal, foregroundColor: Colors.white, padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12)),
                   )
                 else
                   ElevatedButton.icon(
-                    onPressed: _finishWorkout,
+                    onPressed: _finishWorkout, // Saves the whole routine!
                     icon: const Icon(Icons.check_circle),
                     label: const Text("Finish Workout"),
                     style: ElevatedButton.styleFrom(backgroundColor: Colors.green, foregroundColor: Colors.white, padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12)),
@@ -366,7 +435,6 @@ class _ActiveWorkoutPageState extends State<ActiveWorkoutPage> {
         ],
       ),
 
-      // === REST TIMER OVERLAY (Appears when Resting) ===
       bottomSheet: _isResting ? Container(
         color: Colors.teal,
         padding: const EdgeInsets.all(16),
@@ -399,4 +467,4 @@ class _ActiveWorkoutPageState extends State<ActiveWorkoutPage> {
       ) : null,
     );
   }
-  }
+}

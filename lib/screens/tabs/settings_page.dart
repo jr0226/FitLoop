@@ -1,390 +1,320 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import '../../main.dart'; // Needed for themeNotifier
-import '../login_page.dart'; // Needed to redirect after Log Out
-import '../setup_profile_page.dart'; // Needed for Edit Profile
 
-// ==========================================
-// 9. Setting page
-// ==========================================
-
-class SettingsPage extends StatefulWidget {
-  const SettingsPage({super.key});
+class SettingsTab extends StatefulWidget {
+  const SettingsTab({super.key});
 
   @override
-  State<SettingsPage> createState() => _SettingsPageState();
+  State<SettingsTab> createState() => _SettingsTabState();
 }
 
-class _SettingsPageState extends State<SettingsPage> {
-  // --- STATE VARIABLES ---
-  bool _isDarkMode = false;
-  bool _keepScreenAwake = false;
+class _SettingsTabState extends State<SettingsTab> {
+  final User? currentUser = FirebaseAuth.instance.currentUser;
   
-  // Units
-  String _weightUnit = "kg";
-  String _distanceUnit = "km";
-  String _energyUnit = "kcal";
+  bool _isLoading = true;
+  String _userName = "Athlete";
+  String _userGoal = "Maintenance";
+  
+  // App Preferences
+  bool _isDarkMode = false;
+  bool _isMetric = true;
+  bool _notificationsEnabled = true;
 
-  // Notifications
-  bool _workoutReminder = true;
-  bool _mealReminder = true;
-  bool _hydrationReminder = false;
-  bool _weighInReminder = false;
+  final List<String> _goals = ["Weight Loss", "Maintenance", "Muscle Gain"];
 
-  String _selectedLanguage = "English";
-
-  // --- HELPER FUNCTIONS ---
-
-  // 1. Language Picker
-  void _showLanguageDialog() {
-    showDialog(
-      context: context,
-      builder: (context) => SimpleDialog(
-        title: const Text('Select Language'),
-        children: ["English 🇺🇸", "Chinese (中文) 🇨🇳", "Malay (Bahasa) 🇲🇾"]
-            .map((lang) => SimpleDialogOption(
-                  onPressed: () {
-                    setState(() => _selectedLanguage = lang);
-                    Navigator.pop(context);
-                  },
-                  child: Text(lang),
-                ))
-            .toList(),
-      ),
-    );
+  @override
+  void initState() {
+    super.initState();
+    _fetchUserProfile();
   }
 
-  // 2. Unit Picker (Generic)
-  void _showUnitPicker(String title, List<String> options, Function(String) onSelect) {
-    showDialog(
-      context: context,
-      builder: (context) => SimpleDialog(
-        title: Text('Select $title Unit'),
-        children: options
-            .map((opt) => SimpleDialogOption(
-                  onPressed: () {
-                    onSelect(opt);
-                    Navigator.pop(context);
-                  },
-                  child: Text(opt),
-                ))
-            .toList(),
-      ),
-    );
+  Future<void> _fetchUserProfile() async {
+    if (currentUser != null) {
+      try {
+        final doc = await FirebaseFirestore.instance.collection('users').doc(currentUser!.uid).get();
+        if (mounted && doc.exists) {
+          setState(() {
+            _userName = doc.data()?['name'] ?? "Athlete";
+            
+            // === THE FIX ===
+            String fetchedGoal = doc.data()?['goal'] ?? "Maintenance";
+            
+            // If the fetched goal from Firebase isn't in our list, add it dynamically!
+            if (!_goals.contains(fetchedGoal)) {
+              _goals.add(fetchedGoal);
+            }
+            _userGoal = fetchedGoal;
+            // ==============
+            
+            _isMetric = doc.data()?['isMetric'] ?? true;
+            _isLoading = false;
+          });
+        } else {
+          setState(() => _isLoading = false);
+        }
+      } catch (e) {
+        debugPrint("Error fetching profile: $e");
+        setState(() => _isLoading = false);
+      }
+    }
   }
 
-  // 3. Quick Update Weight Dialog
-  void _showUpdateWeightDialog() {
-    final TextEditingController weightCtrl = TextEditingController();
+  // --- FIREBASE UPDATES ---
+  Future<void> _updateGoal(String newGoal) async {
+    setState(() => _userGoal = newGoal);
+    if (currentUser != null) {
+      await FirebaseFirestore.instance.collection('users').doc(currentUser!.uid).update({
+        'goal': newGoal,
+      });
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Fitness goal updated! AI will now adjust your plans.")));
+      }
+    }
+  }
+
+  Future<void> _updateUnitPreference(bool isMetric) async {
+    setState(() => _isMetric = isMetric);
+    if (currentUser != null) {
+      await FirebaseFirestore.instance.collection('users').doc(currentUser!.uid).update({
+        'isMetric': isMetric,
+      });
+    }
+  }
+
+  // --- ACCOUNT MANAGEMENT ---
+  void _signOut() async {
+    await FirebaseAuth.instance.signOut();
+    // Assuming you have a wrapper or login screen set up at the root
+    if (mounted) {
+      Navigator.of(context).pushReplacementNamed('/login'); // Adjust route name to match your app
+    }
+  }
+
+  void _confirmDeleteAccount() {
     showDialog(
       context: context,
-      builder: (context) => AlertDialog(
-        title: const Text("Log Current Weight"),
-        content: TextField(
-          controller: weightCtrl,
-          keyboardType: TextInputType.number,
-          decoration: InputDecoration(labelText: "Current Weight ($_weightUnit)", border: const OutlineInputBorder()),
-        ),
+      builder: (c) => AlertDialog(
+        title: const Text("Delete Account?", style: TextStyle(color: Colors.red)),
+        content: const Text("This action is permanent and will wipe all your workout logs, diets, and routines. Are you absolutely sure?"),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(context), child: const Text("Cancel")),
+          TextButton(onPressed: () => Navigator.pop(c), child: const Text("Cancel")),
           ElevatedButton(
-            onPressed: () {
-              ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Logged: ${weightCtrl.text} $_weightUnit")));
-              Navigator.pop(context);
+            onPressed: () async {
+              Navigator.pop(c);
+              try {
+                // Delete user document from Firestore (Cloud Functions usually handle sub-collection cleanup)
+                await FirebaseFirestore.instance.collection('users').doc(currentUser!.uid).delete();
+                // Delete Auth user
+                await currentUser!.delete();
+                if (mounted) {
+                  Navigator.of(context).pushReplacementNamed('/login');
+                }
+              } catch (e) {
+                ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Error: Requires recent login. Please re-authenticate.")));
+              }
             },
-            child: const Text("Update"),
-          )
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.red, foregroundColor: Colors.white),
+            child: const Text("Delete Everything"),
+          ),
         ],
       ),
     );
-  }
-
-  // 4. Physical Calculator (BMI, BMR, TDEE)
-  void _openCalculator() {
-    showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.transparent, // 变透明以便显示圆角
-      builder: (context) => Container(
-        decoration: const BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-        ),
-        padding: EdgeInsets.only(top: 16, left: 16, right: 16, bottom: MediaQuery.of(context).viewInsets.bottom + 16),
-        child: const SizedBox(
-          height: 300,
-          child: Center(child: Text('Physical Calculator (Coming soon)')),
-        ),
-      ),
-    );
-  }
-
-  // 5. Destructive Action Confirm
-  Future<void> _confirmDestructiveAction(String title, String content, VoidCallback onConfirm) async {
-    bool confirm = await showDialog(
-      context: context, 
-      builder: (context) => AlertDialog(
-        title: Text(title, style: const TextStyle(color: Colors.red)),
-        content: Text(content),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text("Cancel")),
-          TextButton(onPressed: () => Navigator.pop(context, true), child: const Text("Confirm", style: TextStyle(color: Colors.red))),
-        ],
-      )
-    ) ?? false;
-
-    if (confirm) onConfirm();
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text("Settings")),
-      body: ListView(
-        children: [
-          // ==========================
-          // 1. ACCOUNT & GOALS
-          // ==========================
-          _buildHeader("Account & Goals"),
-          ListTile(
-                leading: const Icon(Icons.remove_red_eye_outlined, color: Colors.teal),
-                title: const Text("View Profile Details"),
-                subtitle: const Text("See your full health stats & TDEE"),
-                trailing: const Icon(Icons.arrow_forward_ios, size: 16),
-                onTap: () async {
-          // 1. 获取当前用户
-                  final user = FirebaseAuth.instance.currentUser;
-                  if (user == null) return;
-
-                  // 2. 显示一个简单的加载提示（可选，体验更好）
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text("Loading profile..."), duration: Duration(milliseconds: 500))
-                  );
-
-                  // 3. 从 Firebase 获取该用户的最新数据
-                  final doc = await FirebaseFirestore.instance.collection('users').doc(user.uid).get();
-                  
-                  // 4. 数据获取成功后，把数据传给你的弹窗函数
-                  if (doc.exists && context.mounted) {
-                    _showProfileDetails(doc.data() as Map<String, dynamic>);
-                  }
-                }, // 将流里获取的数据直接传给弹窗
+      backgroundColor: Colors.grey.shade50,
+      appBar: AppBar(
+        title: const Text("Profile & Settings", style: TextStyle(fontWeight: FontWeight.bold)),
+        backgroundColor: Colors.white,
+        elevation: 0,
+      ),
+      body: _isLoading 
+        ? const Center(child: CircularProgressIndicator(color: Colors.teal))
+        : ListView(
+            padding: const EdgeInsets.symmetric(vertical: 20),
+            children: [
+              // PROFILE HEADER
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 20),
+                child: Row(
+                  children: [
+                    CircleAvatar(
+                      radius: 40,
+                      backgroundColor: Colors.teal.shade100,
+                      child: const Icon(Icons.person, size: 40, color: Colors.teal),
+                    ),
+                    const SizedBox(width: 20),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(_userName, style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold)),
+                          Text(currentUser?.email ?? "No Email", style: TextStyle(color: Colors.grey.shade600)),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
               ),
-          ListTile(
-            leading: const Icon(Icons.person_outline),
-            title: const Text("Edit Profile"),
-            subtitle: const Text("Goals, Micro-Splits, Frequency"),
-            trailing: const Icon(Icons.arrow_forward_ios, size: 16),
-            onTap: () => Navigator.push(context, MaterialPageRoute(builder: (context) => const SetupProfilePage(isEditing: true))),
-          ),
-          ListTile(
-            leading: const Icon(Icons.monitor_weight_outlined),
-            title: const Text("Quick Weight Log"),
-            subtitle: const Text("Update current weight only"),
-            trailing: const Icon(Icons.add_circle_outline, color: Colors.teal),
-            onTap: _showUpdateWeightDialog,
-          ),
-          ListTile(
-            leading: const Icon(Icons.calculate_outlined),
-            title: const Text("Physical Calculator"),
-            subtitle: const Text("Check BMI/TDEE scenarios"),
-            onTap: _openCalculator,
-          ),
+              const SizedBox(height: 30),
 
-          const Divider(),
+              // FITNESS GOALS
+              _buildSectionHeader("Fitness Profile"),
+              Container(
+                color: Colors.white,
+                child: ListTile(
+                  leading: Container(
+                    padding: const EdgeInsets.all(8),
+                    decoration: BoxDecoration(color: Colors.orange.shade50, borderRadius: BorderRadius.circular(8)),
+                    child: const Icon(Icons.flag, color: Colors.orange),
+                  ),
+                  title: const Text("Current Goal", style: TextStyle(fontWeight: FontWeight.w600)),
+                  subtitle: const Text("Determines AI suggestions"),
+                  trailing: DropdownButton<String>(
+                    value: _userGoal,
+                    underline: const SizedBox(),
+                    icon: const Icon(Icons.arrow_drop_down, color: Colors.teal),
+                    style: const TextStyle(color: Colors.teal, fontWeight: FontWeight.bold),
+                    onChanged: (String? newValue) {
+                      if (newValue != null) _updateGoal(newValue);
+                    },
+                    items: _goals.map<DropdownMenuItem<String>>((String value) {
+                      return DropdownMenuItem<String>(
+                        value: value,
+                        child: Text(value),
+                      );
+                    }).toList(),
+                  ),
+                ),
+              ),
+              const Divider(height: 1, indent: 20),
+              Container(
+                color: Colors.white,
+                child: SwitchListTile(
+                  activeColor: Colors.teal,
+                  secondary: Container(
+                    padding: const EdgeInsets.all(8),
+                    decoration: BoxDecoration(color: Colors.blue.shade50, borderRadius: BorderRadius.circular(8)),
+                    child: const Icon(Icons.straighten, color: Colors.blue),
+                  ),
+                  title: const Text("Metric Units", style: TextStyle(fontWeight: FontWeight.w600)),
+                  subtitle: Text(_isMetric ? "Kilograms & Kilometers" : "Pounds & Miles"),
+                  value: _isMetric,
+                  onChanged: _updateUnitPreference,
+                ),
+              ),
 
-          // ==========================
-          // 2. UNITS & PREFERENCES
-          // ==========================
-          _buildHeader("Units & Display"),
-          ListTile(
-            title: const Text("Weight Unit"),
-            trailing: Text(_weightUnit.toUpperCase(), style: const TextStyle(color: Colors.teal, fontWeight: FontWeight.bold)),
-            onTap: () => _showUnitPicker("Weight", ["kg", "lbs"], (val) => setState(() => _weightUnit = val)),
-          ),
-          ListTile(
-            title: const Text("Distance Unit"),
-            trailing: Text(_distanceUnit.toUpperCase(), style: const TextStyle(color: Colors.teal, fontWeight: FontWeight.bold)),
-            onTap: () => _showUnitPicker("Distance", ["km", "miles"], (val) => setState(() => _distanceUnit = val)),
-          ),
-          ListTile(
-            title: const Text("Energy Unit"),
-            trailing: Text(_energyUnit.toUpperCase(), style: const TextStyle(color: Colors.teal, fontWeight: FontWeight.bold)),
-            onTap: () => _showUnitPicker("Energy", ["kcal", "kJ"], (val) => setState(() => _energyUnit = val)),
-          ),
-          SwitchListTile(
-            title: const Text("Keep Screen Awake"),
-            subtitle: const Text("Prevent locking during workouts"),
-            value: _keepScreenAwake,
-            onChanged: (val) => setState(() => _keepScreenAwake = val),
-          ),
-          SwitchListTile(
-            title: const Text("Dark Mode"),
-            secondary: Icon(_isDarkMode ? Icons.dark_mode : Icons.light_mode),
-            value: _isDarkMode,
-            onChanged: (val) {
-              setState(() => _isDarkMode = val);
-              themeNotifier.value = val ? ThemeMode.dark : ThemeMode.light;
-            },
-          ),
-          ListTile(
-            leading: const Icon(Icons.language),
-            title: const Text("Language"),
-            subtitle: Text(_selectedLanguage),
-            onTap: _showLanguageDialog,
-          ),
+              const SizedBox(height: 20),
 
-          const Divider(),
+              // APP PREFERENCES
+              _buildSectionHeader("App Preferences"),
+              Container(
+                color: Colors.white,
+                child: Column(
+                  children: [
+                    SwitchListTile(
+                      activeColor: Colors.teal,
+                      secondary: Container(
+                        padding: const EdgeInsets.all(8),
+                        decoration: BoxDecoration(color: Colors.purple.shade50, borderRadius: BorderRadius.circular(8)),
+                        child: const Icon(Icons.dark_mode, color: Colors.purple),
+                      ),
+                      title: const Text("Dark Mode", style: TextStyle(fontWeight: FontWeight.w600)),
+                      value: _isDarkMode,
+                      onChanged: (val) {
+                        setState(() => _isDarkMode = val);
+                        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Requires ThemeProvider wrapper to apply globally.")));
+                      },
+                    ),
+                    const Divider(height: 1, indent: 70),
+                    SwitchListTile(
+                      activeColor: Colors.teal,
+                      secondary: Container(
+                        padding: const EdgeInsets.all(8),
+                        decoration: BoxDecoration(color: Colors.green.shade50, borderRadius: BorderRadius.circular(8)),
+                        child: const Icon(Icons.notifications_active, color: Colors.green),
+                      ),
+                      title: const Text("Push Notifications", style: TextStyle(fontWeight: FontWeight.w600)),
+                      subtitle: const Text("Workout & hydration reminders"),
+                      value: _notificationsEnabled,
+                      onChanged: (val) => setState(() => _notificationsEnabled = val),
+                    ),
+                  ],
+                ),
+              ),
 
-          // ==========================
-          // 3. NOTIFICATIONS
-          // ==========================
-          _buildHeader("Notifications"),
-          SwitchListTile(title: const Text("Workout Reminders"), value: _workoutReminder, onChanged: (v) => setState(() => _workoutReminder = v)),
-          SwitchListTile(title: const Text("Meal Logging"), value: _mealReminder, onChanged: (v) => setState(() => _mealReminder = v)),
-          SwitchListTile(title: const Text("Hydration Alerts"), value: _hydrationReminder, onChanged: (v) => setState(() => _hydrationReminder = v)),
-          SwitchListTile(title: const Text("Weekly Weigh-in"), value: _weighInReminder, onChanged: (v) => setState(() => _weighInReminder = v)),
+              const SizedBox(height: 20),
 
-          const Divider(),
+              // DATA & PRIVACY
+              _buildSectionHeader("Data & Privacy"),
+              Container(
+                color: Colors.white,
+                child: Column(
+                  children: [
+                    ListTile(
+                      leading: const Icon(Icons.cloud_download, color: Colors.grey),
+                      title: const Text("Export Workout Data"),
+                      trailing: const Icon(Icons.chevron_right),
+                      onTap: () {
+                        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Generating CSV file...")));
+                      },
+                    ),
+                    const Divider(height: 1, indent: 70),
+                    ListTile(
+                      leading: const Icon(Icons.privacy_tip, color: Colors.grey),
+                      title: const Text("Privacy Policy"),
+                      trailing: const Icon(Icons.chevron_right),
+                      onTap: () {},
+                    ),
+                  ],
+                ),
+              ),
 
-          // ==========================
-          // 4. DATA & PRIVACY
-          // ==========================
-          _buildHeader("Data & Support"),
-          ListTile(
-            leading: const Icon(Icons.download),
-            title: const Text("Export Data"),
-            subtitle: const Text("Download PDF/CSV Report"),
-            onTap: () => ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Generating Report... (Demo Only)"))),
-          ),
-          ListTile(
-            leading: const Icon(Icons.delete_sweep),
-            title: const Text("Clear History"),
-            onTap: () => _confirmDestructiveAction("Clear History?", "This will delete all past workout and meal logs.", () {
-               ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("History Cleared")));
-            }),
-          ),
-          ListTile(
-            leading: const Icon(Icons.bug_report),
-            title: const Text("Report a Bug"),
-            onTap: () => ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Thank you for your report!"))),
-          ),
-          ListTile(
-            leading: const Icon(Icons.help),
-            title: const Text("Help Center"),
-            onTap: () => ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Opening FAQ..."))),
-          ),
-          const ListTile(
-            leading: Icon(Icons.info_outline),
-            title: Text("Version"),
-            subtitle: Text("v1.0.2 (Beta)"),
-          ),
+              const SizedBox(height: 30),
 
-          const SizedBox(height: 20),
-          
-          // ==========================
-          // 5. DANGER ZONE (LOGOUT / DELETE)
-          // ==========================
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16.0),
-            child: ElevatedButton.icon(
-              style: ElevatedButton.styleFrom(backgroundColor: Colors.red[50], foregroundColor: Colors.red, elevation: 0),
-              icon: const Icon(Icons.logout),
-              label: const Text("Log Out"),
-              onPressed: () => _confirmDestructiveAction("Log Out?", "Are you sure you want to exit?", () async {
-                await FirebaseAuth.instance.signOut();
-                if (context.mounted) {
-                  Navigator.of(context).pushAndRemoveUntil(
-                    MaterialPageRoute(builder: (context) => const LoginPage()),
-                    (route) => false,
-                  );
-                }
-              }),
-            ),
+              // DANGER ZONE
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 20),
+                child: OutlinedButton.icon(
+                  onPressed: _signOut,
+                  icon: const Icon(Icons.logout),
+                  label: const Text("Sign Out"),
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: Colors.black87,
+                    padding: const EdgeInsets.symmetric(vertical: 14),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 12),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 20),
+                child: TextButton(
+                  onPressed: _confirmDeleteAccount,
+                  child: const Text("Delete Account", style: TextStyle(color: Colors.redAccent, fontWeight: FontWeight.bold)),
+                ),
+              ),
+              const SizedBox(height: 40),
+            ],
           ),
-          TextButton(
-            onPressed: () => _confirmDestructiveAction("Delete Account?", "This action is PERMANENT. All data will be lost.", () {
-               // Add delete logic here
-               ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Account deletion request sent.")));
-            }),
-            child: const Text("Delete Account", style: TextStyle(color: Colors.grey, fontSize: 12)),
-          ),
-          const SizedBox(height: 30),
-        ],
-      ),
     );
   }
 
-  Widget _buildHeader(String title) {
+  Widget _buildSectionHeader(String title) {
     return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 20, 16, 8),
-      child: Text(title, style: const TextStyle(color: Colors.teal, fontWeight: FontWeight.bold, fontSize: 14)),
-    );
-  }
-
-  // --- 新增：显示完整个人资料的弹窗 ---
-  void _showProfileDetails(Map<String, dynamic> data) {
-    showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
-      builder: (context) => SingleChildScrollView(
-        child: Padding(
-        padding: const EdgeInsets.all(24.0),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Row(
-              children: [
-                Icon(Icons.assignment_ind, color: Colors.teal),
-                SizedBox(width: 10),
-                Text("Complete Profile", style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Colors.teal)),
-              ],
-            ),
-            const SizedBox(height: 20),
-            _buildDetailRow("Name", data['name']),
-            _buildDetailRow("Gender", data['gender']),
-            _buildDetailRow("Age", "${data['age']} years"),
-            _buildDetailRow("Weight", "${data['weight']} kg"),
-            _buildDetailRow("Height", "${data['height']} cm"),
-            const Divider(height: 30),
-            _buildDetailRow("Activity Level", data['activityLevel']),
-            _buildDetailRow("Goal", data['goal']),
-            const Divider(height: 30),
-            _buildDetailRow("BMR (Resting Cal)", "${(data['bmr'] as num?)?.toStringAsFixed(0) ?? '--'} kcal"),
-            _buildDetailRow("TDEE (Daily Burn)", "${(data['tdee'] as num?)?.toStringAsFixed(0) ?? '--'} kcal"),
-            _buildDetailRow("Target Calories", "${data['dailyCaloriesTarget'] ?? '--'} kcal"),
-            const SizedBox(height: 25),
-            SizedBox(
-              width: double.infinity,
-              height: 45,
-              child: ElevatedButton(
-                style: ElevatedButton.styleFrom(backgroundColor: Colors.teal, foregroundColor: Colors.white),
-                onPressed: () => Navigator.pop(context),
-                child: const Text("Close", style: TextStyle(fontWeight: FontWeight.bold)),
-              )
-            )
-          ],
+      padding: const EdgeInsets.only(left: 20, bottom: 8),
+      child: Text(
+        title.toUpperCase(),
+        style: TextStyle(
+          color: Colors.grey.shade500,
+          fontWeight: FontWeight.bold,
+          fontSize: 12,
+          letterSpacing: 1.2,
         ),
-      ),
-    )
-    );
-  }
-
-  // 辅助组件：生成详细资料的一行文字
-  Widget _buildDetailRow(String label, dynamic value) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 6),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-        children: [
-          Text(label, style: const TextStyle(color: Colors.grey, fontSize: 14)),
-          Text("${value ?? '--'}", style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
-        ],
       ),
     );
   }
 }
-

@@ -61,7 +61,7 @@ Future<void> _syncCaloriesToFirebase(int calories) async {
   // already logs to Firestore in line 220.
       print("Detected $calories kcal");
     }), 
-    const SettingsPage(),
+    const SettingsTab(),
   ];
 
   @override

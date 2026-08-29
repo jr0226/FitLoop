@@ -318,7 +318,7 @@ class _AddFoodPageState extends State<AddFoodPage> {
   final TextEditingController _searchCtrl = TextEditingController();
   bool _isSearching = false;
 
-  final String apiKey = "kal_c045d22406008ad4e8f19677b4df34dee5c0b423b1873fa90fe82031a6e68b3a";
+  final String apiKey = "8alHG9q8gsGcxiDeckmVdPI0Crn8ScxrgKnYA0z7";
 
   // --- 1. SEARCH FOOD VIA API ---
   Future<void> _searchFoodApi(String query) async {
@@ -331,7 +331,7 @@ class _AddFoodPageState extends State<AddFoodPage> {
     });
 
     try {
-      final url = Uri.parse('https://api.kalori-api.my/api/v1/foods/search?q=$query'); 
+      final url = Uri.parse('https://api-ninjas.com/api/food?query=$query'); 
 
       final response = await http.get(
         url,
