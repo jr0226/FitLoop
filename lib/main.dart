@@ -15,7 +15,7 @@ void main() async {
   await Firebase.initializeApp(
     options: DefaultFirebaseOptions.currentPlatform, // 读取你刚才生成的配置
   );
-  AppConfig.validateConfiguration();
+  AppConfig.logConfig();
   final user = FirebaseAuth.instance.currentUser;
   runApp(MyApp(isLoggedIn: user != null));
 }

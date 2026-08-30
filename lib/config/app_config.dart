@@ -2,58 +2,35 @@ import 'package:flutter/foundation.dart';
 
 /// Centralized application configuration.
 /// 
-/// Non-sensitive build-time configurations are passed via `--dart-define`.
-///
-/// NOTE on DevSecOps & Security:
-/// Any secret passed via `--dart-define` is compiled directly into the client
-/// binary and can be extracted via reverse engineering. In production, sensitive
-/// operations (e.g. Gemini AI, third-party API keys) should be routed through a
-/// secure backend proxy (configured via [apiBaseUrl]), while `--dart-define` keys
-/// are supported for local testing/fallback.
+/// Non-sensitive runtime and build-time configurations are configured here.
+/// 
+/// Security Design:
+/// Sensitive third-party API keys (Gemini, RapidAPI, API-Ninjas) MUST NEVER
+/// be stored or defined in Flutter (even via `--dart-define`, as compiled strings
+/// can be easily extracted from client binaries). All sensitive operations are
+/// delegated to the backend API specified by [apiBaseUrl].
 class AppConfig {
-  /// Base URL of your backend API or Firebase Cloud Functions proxy.
-  /// Example: flutter run --dart-define=API_BASE_URL=https://api.example.com
+  /// Base URL of your backend API layer or Firebase Cloud Functions server.
+  /// Android emulator uses 10.0.2.2; iOS simulator and web use localhost or remote host.
+  /// Pass custom URL via: flutter run --dart-define=API_BASE_URL=https://api.yourdomain.com
   static const String apiBaseUrl = String.fromEnvironment(
     'API_BASE_URL',
-    defaultValue: '',
+    defaultValue: 'http://10.0.2.2:8000',
   );
 
-  /// Gemini API Key for direct client calls (fallback/local development only).
-  /// Production should route requests through [apiBaseUrl].
-  static const String geminiApiKey = String.fromEnvironment(
-    'GEMINI_API_KEY',
-    defaultValue: '',
+  /// Application environment flag (e.g. 'development', 'staging', 'production')
+  static const String environment = String.fromEnvironment(
+    'APP_ENV',
+    defaultValue: 'development',
   );
 
-  /// RapidAPI Key for ExerciseDB queries (fallback/local development only).
-  static const String rapidApiKey = String.fromEnvironment(
-    'RAPIDAPI_KEY',
-    defaultValue: '',
-  );
+  /// Request timeout in seconds
+  static const int requestTimeoutSeconds = 30;
 
-  /// API Ninjas Key for nutrition queries (fallback/local development only).
-  static const String apiNinjasKey = String.fromEnvironment(
-    'API_NINJAS_KEY',
-    defaultValue: '',
-  );
-
-  /// Check if backend proxy is active
-  static bool get hasBackendProxy => apiBaseUrl.trim().isNotEmpty;
-
-  /// Helper to warn in debug logs if a key or proxy is missing
-  static void validateConfiguration() {
+  /// Helper to log active non-sensitive environment configuration in debug mode
+  static void logConfig() {
     if (kDebugMode) {
-      if (!hasBackendProxy) {
-        if (geminiApiKey.isEmpty) {
-          debugPrint('⚠️ [Security/Config] No API_BASE_URL or GEMINI_API_KEY defined. Pass via --dart-define.');
-        }
-        if (rapidApiKey.isEmpty) {
-          debugPrint('⚠️ [Security/Config] No RAPIDAPI_KEY defined for ExerciseDB.');
-        }
-        if (apiNinjasKey.isEmpty) {
-          debugPrint('⚠️ [Security/Config] No API_NINJAS_KEY defined for Food search.');
-        }
-      }
+      debugPrint('🔧 [AppConfig] Active Backend URL: $apiBaseUrl (Env: $environment)');
     }
   }
 }

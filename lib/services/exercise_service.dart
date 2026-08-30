@@ -4,59 +4,96 @@ import 'package:http/http.dart' as http;
 import '../config/app_config.dart';
 
 class ExerciseService {
-  /// Searches exercises by name from ExerciseDB via backend proxy or direct API fallback.
-  static Future<List<dynamic>> searchExercises(String query) async {
-    final cleanQuery = query.trim().toLowerCase();
+  /// Searches exercises by name via the backend API.
+  /// 
+  /// The mobile app never transmits or holds private RapidAPI credentials.
+  static Future<List<dynamic>> searchExercises(String query, {int limit = 20}) async {
+    final cleanQuery = query.trim();
     if (cleanQuery.isEmpty) return [];
 
-    if (AppConfig.hasBackendProxy) {
-      return await _searchViaBackend(cleanQuery);
-    } else if (AppConfig.rapidApiKey.isNotEmpty) {
-      return await _searchViaDirectRapidApi(cleanQuery);
-    } else {
-      throw Exception(
-        'Exercise service not configured. Set API_BASE_URL or RAPIDAPI_KEY via --dart-define.',
-      );
-    }
-  }
-
-  static Future<List<dynamic>> _searchViaBackend(String query) async {
     final user = FirebaseAuth.instance.currentUser;
     final token = await user?.getIdToken();
 
-    final url = Uri.parse('${AppConfig.apiBaseUrl}/api/exercises?query=$query');
+    final url = Uri.parse(
+      '${AppConfig.apiBaseUrl}/api/exercises/search?query=${Uri.encodeComponent(cleanQuery)}&limit=$limit',
+    );
+
     final response = await http.get(
       url,
       headers: {
         if (token != null) 'Authorization': 'Bearer $token',
       },
+    ).timeout(
+      const Duration(seconds: AppConfig.requestTimeoutSeconds),
+      onTimeout: () => throw Exception('Exercise search request timed out.'),
     );
 
     if (response.statusCode == 200) {
       final data = json.decode(response.body);
       return data is List ? data : [];
     } else {
-      throw Exception('Backend Exercise Search failed: ${response.statusCode}');
+      throw Exception('Backend Exercise API error (${response.statusCode}): ${response.body}');
     }
   }
 
-  static Future<List<dynamic>> _searchViaDirectRapidApi(String query) async {
+  /// Fetches exercises by target body part (e.g. 'chest', 'back', 'cardio') via backend API.
+  static Future<List<dynamic>> getExercisesByBodyPart(String bodyPart, {int limit = 20}) async {
+    final cleanBodyPart = bodyPart.trim().toLowerCase();
+    if (cleanBodyPart.isEmpty) return [];
+
+    final user = FirebaseAuth.instance.currentUser;
+    final token = await user?.getIdToken();
+
     final url = Uri.parse(
-      'https://exercisedb.p.rapidapi.com/exercises/name/$query?limit=20',
+      '${AppConfig.apiBaseUrl}/api/exercises/body-part/${Uri.encodeComponent(cleanBodyPart)}?limit=$limit',
     );
+
     final response = await http.get(
       url,
       headers: {
-        'X-RapidAPI-Key': AppConfig.rapidApiKey,
-        'X-RapidAPI-Host': 'exercisedb.p.rapidapi.com',
+        if (token != null) 'Authorization': 'Bearer $token',
       },
+    ).timeout(
+      const Duration(seconds: AppConfig.requestTimeoutSeconds),
+      onTimeout: () => throw Exception('Exercise body-part request timed out.'),
     );
 
     if (response.statusCode == 200) {
       final data = json.decode(response.body);
       return data is List ? data : [];
     } else {
-      throw Exception('RapidAPI Error: ${response.statusCode}');
+      throw Exception('Backend Exercise API error (${response.statusCode}): ${response.body}');
+    }
+  }
+
+  /// Fetches single exercise details by unique exercise ID.
+  static Future<Map<String, dynamic>?> getExerciseById(String exerciseId) async {
+    final cleanId = exerciseId.trim();
+    if (cleanId.isEmpty) return null;
+
+    final user = FirebaseAuth.instance.currentUser;
+    final token = await user?.getIdToken();
+
+    final url = Uri.parse(
+      '${AppConfig.apiBaseUrl}/api/exercises/${Uri.encodeComponent(cleanId)}',
+    );
+
+    final response = await http.get(
+      url,
+      headers: {
+        if (token != null) 'Authorization': 'Bearer $token',
+      },
+    ).timeout(
+      const Duration(seconds: AppConfig.requestTimeoutSeconds),
+      onTimeout: () => throw Exception('Exercise detail request timed out.'),
+    );
+
+    if (response.statusCode == 200) {
+      return json.decode(response.body) as Map<String, dynamic>;
+    } else if (response.statusCode == 404) {
+      return null;
+    } else {
+      throw Exception('Backend Exercise API error (${response.statusCode}): ${response.body}');
     }
   }
 }

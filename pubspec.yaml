@@ -15,7 +15,6 @@ dependencies:
   http: ^1.1.0
   simple_barcode_scanner: ^0.4.0
   image_picker: ^1.2.1
-  google_generative_ai: ^0.4.7
   local_auth: ^2.1.6
   google_sign_in: ^6.2.1
   health: ^13.3.1

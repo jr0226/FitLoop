@@ -3,28 +3,53 @@ rules_version = '2';
 service firebase.storage {
   match /b/{bucket}/o {
 
-    // Helper functions for security validation
-    function isAuthenticated() {
+    // ==========================================
+    // Security Helper Functions
+    // ==========================================
+
+    /// Verifies that the request is from an authenticated Firebase user
+    function signedIn() {
       return request.auth != null;
     }
 
+    /// Verifies that the authenticated UID matches the target path owner
     function isOwner(userId) {
-      return isAuthenticated() && request.auth.uid == userId;
+      return signedIn() && request.auth.uid == userId;
     }
 
+    /// Validates that an upload is a valid image format under 10MB
     function isValidImage() {
       return request.resource.contentType.matches('image/.*')
-          && request.resource.size < 5 * 1024 * 1024; // 5MB maximum file size
+          && request.resource.size < 10 * 1024 * 1024; // 10 MB maximum file size
     }
 
-    // User-specific storage directories (food scans, profile photos, attachments)
+    // ==========================================
+    // User-Isolated Storage Buckets
+    // ==========================================
+
+    // Food meal scan images & profile uploads
+    match /users/{userId}/food-images/{fileName} {
+      allow read: if isOwner(userId);
+      allow write: if isOwner(userId) && isValidImage();
+      allow delete: if isOwner(userId);
+    }
+
+    match /users/{userId}/profile-photos/{fileName} {
+      allow read: if isOwner(userId);
+      allow write: if isOwner(userId) && isValidImage();
+      allow delete: if isOwner(userId);
+    }
+
+    // General user data path (must be owned by user and contain valid image assets)
     match /users/{userId}/{allPaths=**} {
       allow read: if isOwner(userId);
       allow write: if isOwner(userId) && isValidImage();
       allow delete: if isOwner(userId);
     }
 
-    // Default deny all other paths
+    // ==========================================
+    // Default Deny Rule for Root & Unowned Paths
+    // ==========================================
     match /{allPaths=**} {
       allow read, write: if false;
     }
