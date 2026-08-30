@@ -6,6 +6,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 // 👇 引入你要跳转的其他页面 (注意路径，如果它们都在 screens 文件夹下，直接写文件名即可)
 import 'main_dashboard.dart'; 
 import 'setup_profile_page.dart';
+import '../widgets/forgot_password_modal.dart';
 
 // ==========================================
 // 2. LOGIN MODULE
@@ -157,7 +158,31 @@ class _LoginPageState extends State<LoginPage> {
                   obscureText: true,
                   decoration: const InputDecoration(labelText: 'Password', border: OutlineInputBorder(), prefixIcon: Icon(Icons.lock)),
                 ),
-                const SizedBox(height: 24),
+                if (_isLoginMode)
+                  Align(
+                    alignment: Alignment.centerRight,
+                    child: TextButton(
+                      onPressed: () {
+                        ForgotPasswordModal.show(
+                          context,
+                          initialEmail: _emailController.text.trim(),
+                        );
+                      },
+                      style: TextButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+                        visualDensity: VisualDensity.compact,
+                      ),
+                      child: const Text(
+                        'Forgot Password?',
+                        style: TextStyle(
+                          color: Colors.teal,
+                          fontWeight: FontWeight.w600,
+                          fontSize: 13,
+                        ),
+                      ),
+                    ),
+                  ),
+                const SizedBox(height: 16),
                 if (_isLoading)
                   const CircularProgressIndicator()
                 else

@@ -1,6 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import '../../services/auth_service.dart';
+import '../../widgets/change_password_dialog.dart';
+import '../login_page.dart';
 
 class SettingsTab extends StatefulWidget {
   const SettingsTab({super.key});
@@ -83,11 +86,82 @@ class _SettingsTabState extends State<SettingsTab> {
   }
 
   // --- ACCOUNT MANAGEMENT ---
-  void _signOut() async {
-    await FirebaseAuth.instance.signOut();
-    // Assuming you have a wrapper or login screen set up at the root
-    if (mounted) {
-      Navigator.of(context).pushReplacementNamed('/login'); // Adjust route name to match your app
+  void _confirmSignOut() {
+    showDialog(
+      context: context,
+      builder: (dialogCtx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: const Row(
+          children: [
+            Icon(Icons.logout, color: Colors.teal),
+            SizedBox(width: 10),
+            Text("Sign Out", style: TextStyle(fontWeight: FontWeight.bold)),
+          ],
+        ),
+        content: const Text("Are you sure you want to log out of FitLoop?"),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogCtx),
+            child: Text("Cancel", style: TextStyle(color: Colors.grey.shade700)),
+          ),
+          ElevatedButton(
+            onPressed: () async {
+              Navigator.pop(dialogCtx);
+              _performSignOut();
+            },
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.teal,
+              foregroundColor: Colors.white,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+            ),
+            child: const Text("Sign Out"),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _performSignOut() async {
+    // Show non-dismissible loading overlay
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (c) => const Center(
+        child: Card(
+          child: Padding(
+            padding: EdgeInsets.all(24.0),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                CircularProgressIndicator(color: Colors.teal),
+                SizedBox(height: 16),
+                Text("Signing out...", style: TextStyle(fontWeight: FontWeight.w500)),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+
+    try {
+      await AuthService.signOut();
+      if (!mounted) return;
+
+      // Close loading dialog
+      Navigator.of(context, rootNavigator: true).pop();
+
+      // Clear full navigation stack and navigate to LoginPage
+      Navigator.of(context).pushAndRemoveUntil(
+        MaterialPageRoute(builder: (context) => const LoginPage()),
+        (route) => false,
+      );
+    } catch (e) {
+      if (!mounted) return;
+      // Close loading dialog if open
+      Navigator.of(context, rootNavigator: true).pop();
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text("Failed to sign out: $e")),
+      );
     }
   }
 
@@ -108,10 +182,15 @@ class _SettingsTabState extends State<SettingsTab> {
                 // Delete Auth user
                 await currentUser!.delete();
                 if (mounted) {
-                  Navigator.of(context).pushReplacementNamed('/login');
+                  Navigator.of(context).pushAndRemoveUntil(
+                    MaterialPageRoute(builder: (context) => const LoginPage()),
+                    (route) => false,
+                  );
                 }
               } catch (e) {
-                ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Error: Requires recent login. Please re-authenticate.")));
+                if (mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Error: Requires recent login. Please re-authenticate.")));
+                }
               }
             },
             style: ElevatedButton.styleFrom(backgroundColor: Colors.red, foregroundColor: Colors.white),
@@ -273,13 +352,30 @@ class _SettingsTabState extends State<SettingsTab> {
                 ),
               ),
 
-              const SizedBox(height: 30),
+              // SECURITY & ACCOUNT
+              _buildSectionHeader("Account Security"),
+              Container(
+                color: Colors.white,
+                child: ListTile(
+                  leading: Container(
+                    padding: const EdgeInsets.all(8),
+                    decoration: BoxDecoration(color: Colors.teal.shade50, borderRadius: BorderRadius.circular(8)),
+                    child: const Icon(Icons.lock_reset, color: Colors.teal),
+                  ),
+                  title: const Text("Change / Reset Password", style: TextStyle(fontWeight: FontWeight.w600)),
+                  subtitle: const Text("Update password or send reset email"),
+                  trailing: const Icon(Icons.chevron_right),
+                  onTap: () => ChangePasswordDialog.show(context),
+                ),
+              ),
+
+              const SizedBox(height: 20),
 
               // DANGER ZONE
               Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 20),
                 child: OutlinedButton.icon(
-                  onPressed: _signOut,
+                  onPressed: _confirmSignOut,
                   icon: const Icon(Icons.logout),
                   label: const Text("Sign Out"),
                   style: OutlinedButton.styleFrom(

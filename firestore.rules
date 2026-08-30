@@ -1,0 +1,46 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Helper functions for security and authentication checks
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    // Matches the root user document
+    match /users/{userId} {
+      // Users can only read, create, update, or delete their own profile
+      allow read, write: if isOwner(userId);
+
+      // Subcollection: Food logs (nutrition & meals diary)
+      match /food_logs/{foodLogId} {
+        allow read, write: if isOwner(userId);
+      }
+
+      // Subcollection: Workout logs (completed exercise sessions)
+      match /workout_logs/{workoutLogId} {
+        allow read, write: if isOwner(userId);
+      }
+
+      // Subcollection: Routines (custom & AI-generated workout routines)
+      match /routines/{routineId} {
+        allow read, write: if isOwner(userId);
+      }
+
+      // Subcollection: Daily logs (daily aggregated health, steps, water, sleep)
+      match /daily_logs/{dateStr} {
+        allow read, write: if isOwner(userId);
+      }
+    }
+
+    // Default deny all other collections and documents
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

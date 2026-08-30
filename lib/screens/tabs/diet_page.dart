@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:http/http.dart' as http; // 👈 Needed for Kalori API
-import 'dart:convert';
+import '../../services/food_service.dart';
+
 // ==========================================
 // 8. DIET PAGE (MAIN LOG & DASHBOARD - SYNCED WITH FIREBASE)
 // ==========================================
@@ -318,49 +318,35 @@ class _AddFoodPageState extends State<AddFoodPage> {
   final TextEditingController _searchCtrl = TextEditingController();
   bool _isSearching = false;
 
-  final String apiKey = "YOUR_NINJAS_API_KEY_HERE"; // Replace with your actual API key from https://api-ninjas.com/api/food
-
   // --- 1. SEARCH FOOD VIA API ---
   Future<void> _searchFoodApi(String query) async {
     if (query.trim().isEmpty) return;
 
     setState(() {
       _isSearching = true;
-      // 💡 优化：不再在这里清空 _searchResults。
-      // 这样用户在等待新结果时，依然能看到“before data (之前的数据)”。
     });
 
     try {
-      final url = Uri.parse('https://api-ninjas.com/api/food?query=$query'); 
-
-      final response = await http.get(
-        url,
-        headers: {
-          'X-API-Key': apiKey, 
-        },
-      );
-
-      if (response.statusCode == 200) {
-        final data = json.decode(response.body);
-        
+      final results = await FoodService.searchFood(query);
+      if (mounted) {
         setState(() {
-          _searchResults = data is List 
-              ? data 
-              : (data['data'] ?? data['results'] ?? data['items'] ?? []);
+          _searchResults = results;
           _isSearching = false;
         });
-        
-        if (_searchResults.isEmpty && mounted) {
-           ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("No food found.")));
+
+        if (_searchResults.isEmpty) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text("No food found.")),
+          );
         }
-      } else {
-        throw Exception("API Error: ${response.statusCode}");
       }
     } catch (e) {
-      print("API Fetch Error: $e");
+      debugPrint("API Fetch Error: $e");
       if (mounted) {
         setState(() => _isSearching = false);
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Error fetching food database. Check API Key.")));
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text("Error fetching food database: $e")),
+        );
       }
     }
   }

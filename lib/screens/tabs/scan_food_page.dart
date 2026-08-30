@@ -1,9 +1,8 @@
-import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:image_picker/image_picker.dart';
-import 'package:google_generative_ai/google_generative_ai.dart';
+import '../../services/ai_service.dart';
 
 class CameraTab extends StatefulWidget {
   final Function(int) onFoodDetected;
@@ -21,11 +20,6 @@ class _CameraTabState extends State<CameraTab>
   DateTime _selectedDate = DateTime.now();
   late AnimationController _pulseController;
 
-  // Replace with your actual Gemini API key
-  final _model = GenerativeModel(
-    model: 'gemini-3-flash-preview',
-    apiKey: 'YOUR_GEMINI_API_KEY_HERE',
-  );
 
   @override
   void initState() {
@@ -92,79 +86,45 @@ class _CameraTabState extends State<CameraTab>
       final String userGoal = userDoc.data()?['goal'] ?? 'Maintenance';
 
       final bytes = await photo.readAsBytes();
+      final Map<String, dynamic> analysisData = await AiService.analyzeFoodImage(
+        imageBytes: bytes,
+        userGoal: userGoal,
+      );
 
-      final prompt = '''
-      You are an elite AI sports nutritionist. Analyze the food in this image.
-      The user's fitness goal is "$userGoal".
-      Return ONLY a valid JSON object matching this exact structure (no markdown backticks):
-      {
-        "foods": [
-          {"name": "string", "calories": int, "proteins": int, "carbs": int, "fats": int}
-        ],
-        "totalCalories": int,
-        "totalProteins": int,
-        "totalCarbs": int,
-        "totalFats": int,
-        "score": int,
-        "explanation": "string",
-        "alternatives": ["string", "string"]
-      }
-      ''';
+      // DIRECTLY SAVE TO FIREBASE
+      final List<dynamic> foods = analysisData['foods'] ?? [];
+      await FirebaseFirestore.instance
+          .collection('users')
+          .doc(user.uid)
+          .collection('food_logs')
+          .add({
+        'name': foods.length > 1
+            ? "Mixed Meal (${foods.length} items)"
+            : (foods.isNotEmpty ? foods[0]['name'] : 'Meal'),
+        'calories': analysisData['totalCalories'] ?? 0,
+        'proteins': analysisData['totalProteins'] ?? 0,
+        'carbs': analysisData['totalCarbs'] ?? 0,
+        'fats': analysisData['totalFats'] ?? 0,
+        'score': analysisData['score'] ?? 0,
+        'explanation': analysisData['explanation'] ?? '',
+        'alternatives': analysisData['alternatives'] ?? [],
+        'foods': foods, // Save the itemized array for the bottom sheet!
+        'timestamp': _selectedDate,
+      });
 
-      final content = [
-        Content.multi([TextPart(prompt), DataPart('image/jpeg', bytes)]),
-      ];
-
-      final response = await _model.generateContent(content);
-      if (response.text == null || response.text!.isEmpty) {
-        throw Exception("Empty AI response.");
-      }
-
-      String rawText = response.text!;
-      int startIndex = rawText.indexOf('{');
-      int endIndex = rawText.lastIndexOf('}');
-
-      if (startIndex != -1 && endIndex != -1) {
-        String cleanJson = rawText.substring(startIndex, endIndex + 1);
-        Map<String, dynamic> analysisData = json.decode(cleanJson);
-
-        // DIRECTLY SAVE TO FIREBASE
-        final List<dynamic> foods = analysisData['foods'] ?? [];
-        await FirebaseFirestore.instance
-            .collection('users')
-            .doc(user.uid)
-            .collection('food_logs')
-            .add({
-          'name': foods.length > 1
-              ? "Mixed Meal (${foods.length} items)"
-              : (foods.isNotEmpty ? foods[0]['name'] : 'Meal'),
-          'calories': analysisData['totalCalories'] ?? 0,
-          'proteins': analysisData['totalProteins'] ?? 0,
-          'carbs': analysisData['totalCarbs'] ?? 0,
-          'fats': analysisData['totalFats'] ?? 0,
-          'score': analysisData['score'] ?? 0,
-          'explanation': analysisData['explanation'] ?? '',
-          'alternatives': analysisData['alternatives'] ?? [],
-          'foods': foods, // Save the itemized array for the bottom sheet!
-          'timestamp': _selectedDate,
-        });
-
-        if (mounted) {
-          setState(() => _scanning = false);
-          widget.onFoodDetected((analysisData['totalCalories'] ?? 0) as int);
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text("Meal instantly logged to diary!")),
-          );
-        }
-      } else {
-        throw Exception("Invalid JSON formatting.");
+      if (mounted) {
+        setState(() => _scanning = false);
+        widget.onFoodDetected((analysisData['totalCalories'] ?? 0) as int);
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text("Meal instantly logged to diary!")),
+        );
       }
     } catch (e) {
       if (mounted) {
         setState(() => _scanning = false);
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text("Could not recognize food. Please try again."),
+          SnackBar(
+            content: Text("Could not recognize food: $e"),
           ),
         );
       }

@@ -1,9 +1,8 @@
 import 'package:flutter/material.dart';
-import 'dart:convert';
-import 'package:http/http.dart' as http;
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:google_generative_ai/google_generative_ai.dart';
+import '../../services/ai_service.dart';
+import '../../services/exercise_service.dart';
 
 import '../active_workout_page.dart';
 
@@ -50,37 +49,30 @@ class _WorkoutTabState extends State<WorkoutTab> {
     if (query.trim().isEmpty) return;
     setState(() => _isLoading = true);
     
-    const String apiKey = 'YOUR_RAPIDAPI_KEY_HERE'; // Replace with
-    
     try {
-      final url = Uri.parse('https://exercisedb.p.rapidapi.com/exercises/name/${query.toLowerCase()}?limit=20');
-      final response = await http.get(url, headers: {
-        'X-RapidAPI-Key': apiKey,
-        'X-RapidAPI-Host': 'exercisedb.p.rapidapi.com'
-      });
-
-      if (response.statusCode == 200) {
+      final results = await ExerciseService.searchExercises(query);
+      if (mounted) {
         setState(() {
-          _apiExercises = json.decode(response.body);
+          _apiExercises = results;
           _isLoading = false;
         });
-        if (_apiExercises.isEmpty && mounted) {
-           ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("No exercises found.")));
+        if (_apiExercises.isEmpty) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text("No exercises found.")),
+          );
         }
-      } else {
-        throw Exception("API Error");
       }
     } catch (e) {
       if (mounted) {
         setState(() => _isLoading = false);
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Error fetching workouts.")));
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text("Error fetching workouts: $e")),
+        );
       }
     }
   }
 
   // --- 🤖 AI ROUTINE GENERATOR (Builds & Saves Full Plans!) ---
-  // --- 🤖 AI ROUTINE GENERATOR (Builds & Saves Full Plans!) ---
-  // --- 🤖 AI ROUTINE GENERATOR (Bulletproof Version) ---
   Future<void> _generateFullAIPlan() async {
     bool isDialogOpen = true;
 
@@ -100,83 +92,32 @@ class _WorkoutTabState extends State<WorkoutTab> {
     ).then((_) => isDialogOpen = false); 
 
     try {
-      final model = GenerativeModel(
-        model: 'gemini-3-flash-preview',
-        apiKey: 'AQ.Ab8RN6I1PStszIyyzaHsTBKjwf31ZoYQ8bXBHmm-C4rtpGPROg', // Ensure this key is active!
+      final List<Map<String, dynamic>> generatedRoutines = await AiService.generateWorkoutPlan(
+        userGoal: _userGoal,
+        difficulty: _difficulty,
       );
 
-      final prompt = '''
-      The user's fitness goal is "$_userGoal" and their level is "$_difficulty".
-      Create 2 distinct workout routines (e.g., Upper Body, Lower Body).
-      Each routine should have exactly 3 exercises.
-      Return ONLY a valid JSON array of objects. Do not include any markdown formatting, backticks, or conversational text.
-      [
-        {
-          "routineName": "String",
-          "level": "$_difficulty",
-          "category": "Full Body",
-          "image": "[https://images.unsplash.com/photo-1517836357463-d25dfeac3438?w=400](https://images.unsplash.com/photo-1517836357463-d25dfeac3438?w=400)",
-          "exercises": [
-            {
-              "name": "Exercise Name",
-              "category": "Target Muscle",
-              "sets": "3 sets x 10 reps",
-              "image": "[https://images.unsplash.com/photo-1599058945522-28d584b6f0ff?w=400](https://images.unsplash.com/photo-1599058945522-28d584b6f0ff?w=400)",
-              "desc": "Brief form instruction."
-            }
-          ]
-        }
-      ]
-      ''';
+      final uid = FirebaseAuth.instance.currentUser!.uid;
+      final batch = FirebaseFirestore.instance.batch();
+      
+      for (var routine in generatedRoutines) {
+        final docRef = FirebaseFirestore.instance.collection('users').doc(uid).collection('routines').doc();
+        batch.set(docRef, {
+          ...routine,
+          'createdAt': FieldValue.serverTimestamp(),
+        });
+      }
+      await batch.commit();
 
-      final response = await model.generateContent([Content.text(prompt)]);
-
-      if (response.text != null) {
-        String rawText = response.text!;
-        
-        // 🔍 DEBUGGING: Print exactly what Gemini returned to your VS Code console!
-        debugPrint("==== GEMINI RAW RESPONSE ====");
-        debugPrint(rawText);
-        debugPrint("=============================");
-
-        // 🛡️ BULLETPROOFING: Strip out any markdown Gemini might have ignored instructions and added
-        String cleanText = rawText.replaceAll('```json', '').replaceAll('```', '').trim();
-        
-        int start = cleanText.indexOf('[');
-        int end = cleanText.lastIndexOf(']');
-        
-        if (start != -1 && end != -1) {
-          String finalJsonString = cleanText.substring(start, end + 1);
-          List<dynamic> generatedRoutines = json.decode(finalJsonString);
-          
-          final uid = FirebaseAuth.instance.currentUser!.uid;
-          final batch = FirebaseFirestore.instance.batch();
-          
-          for (var rawRoutine in generatedRoutines) {
-            // === THE FIX: Explicitly cast the dynamic map to Map<String, dynamic> ===
-            Map<String, dynamic> routine = Map<String, dynamic>.from(rawRoutine as Map);
-            
-            final docRef = FirebaseFirestore.instance.collection('users').doc(uid).collection('routines').doc();
-            batch.set(docRef, {
-              ...routine,
-              'createdAt': FieldValue.serverTimestamp(),
-            });
-          }
-          await batch.commit();
-
-          if (isDialogOpen && mounted) {
-            Navigator.pop(context);
-            isDialogOpen = false;
-          }
-          
-          if (mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("AI Plan generated and saved to your routines! 🎉")));
-          }
-        } else {
-          throw Exception("Could not find JSON array brackets [ ] in the response.");
-        }
-      } else {
-        throw Exception("AI returned an empty response.");
+      if (isDialogOpen && mounted) {
+        Navigator.pop(context);
+        isDialogOpen = false;
+      }
+      
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text("AI Plan generated and saved to your routines! 🎉")),
+        );
       }
     } catch (e) {
       debugPrint("==== AI GENERATION ERROR ====");

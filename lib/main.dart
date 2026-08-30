@@ -4,6 +4,7 @@ import 'firebase_options.dart'; // ✅ 新增：引入配置文件
 import 'package:firebase_auth/firebase_auth.dart';
 import 'screens/main_dashboard.dart';
 import 'screens/login_page.dart';
+import 'config/app_config.dart';
 
 // Import scanner
 final ValueNotifier<ThemeMode> themeNotifier = ValueNotifier(ThemeMode.light);
@@ -14,6 +15,7 @@ void main() async {
   await Firebase.initializeApp(
     options: DefaultFirebaseOptions.currentPlatform, // 读取你刚才生成的配置
   );
+  AppConfig.validateConfiguration();
   final user = FirebaseAuth.instance.currentUser;
   runApp(MyApp(isLoggedIn: user != null));
 }

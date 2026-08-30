@@ -5,6 +5,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 // 👇 引入你即将分离的 5 个子页面 (Tabs)
 import 'tabs/home_dashboard.dart';
 import 'tabs/workout_page.dart';
+import 'workout_hub_screen.dart';
 import 'tabs/diet_page.dart';
 import 'tabs/scan_food_page.dart';
 import 'tabs/settings_page.dart';
@@ -52,9 +53,9 @@ Future<void> _syncCaloriesToFirebase(int calories) async {
     }
   // Updated List of Pages
   final List<Widget> _pages = [
-    const HomeTab(),      // Index 0
-    const WorkoutTab(),   // Index 1
-    const DietPage(),     // Index 2 (New Diet Page)
+    const HomeTab(),            // Index 0
+    const WorkoutHubScreen(),   // Index 1 (Screen A: Workout Hub)
+    const DietPage(),           // Index 2 (Diet Page)
     // Camera Logic embedded or separate, keeping placeholder for now if you want 5 tabs
     CameraTab(onFoodDetected: (calories) {
   // This updates your local state if needed, though your CameraTab 
