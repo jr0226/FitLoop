@@ -6,56 +6,127 @@ service cloud.firestore {
     // ==========================================
     // Security Helper Functions
     // ==========================================
-    
-    /// Checks if the requesting user is authenticated via Firebase Auth
+
+    /// Returns true if the request originates from a Firebase-authenticated user.
     function signedIn() {
       return request.auth != null;
     }
 
-    /// Validates that the requesting user's UID strictly matches the document owner UID
+    /// Returns true only when the authenticated user's UID exactly matches the
+    /// document owner path segment.  No cross-user access is possible.
     function isOwner(userId) {
       return signedIn() && request.auth.uid == userId;
     }
 
-    /// Prevents client from altering or falsifying internal UID fields
+    /// Prevents a client from writing or altering an embedded `uid` field to a
+    /// value that does not match the path owner.  Ownership is authoritative via
+    /// the URL path; embedded fields are secondary.
     function isImmutableUid(userId) {
-      return !('uid' in request.resource.data) || request.resource.data.uid == userId;
+      return !('uid' in request.resource.data)
+          || request.resource.data.uid == userId;
     }
 
     // ==========================================
-    // User Profile & Tenant Isolation Rules
+    // Lightweight Field Validation Helpers
     // ==========================================
-    
+
+    /// Food logs must carry a non-negative calorie value when present.
+    function validFoodLog() {
+      let d = request.resource.data;
+      return !('calories' in d)
+          || (d.calories is number && d.calories >= 0);
+    }
+
+    /// Workout logs must carry non-negative duration and calorie values when present.
+    function validWorkoutLog() {
+      let d = request.resource.data;
+      return (!('durationSeconds' in d) || (d.durationSeconds is number && d.durationSeconds >= 0))
+          && (!('caloriesBurned' in d) || (d.caloriesBurned is number && d.caloriesBurned >= 0));
+    }
+
+    /// Measurement weight must be positive when present.
+    function validMeasurement() {
+      let d = request.resource.data;
+      return !('weight' in d)
+          || (d.weight is number && d.weight > 0);
+    }
+
+    // ==========================================
+    // User Profile Document
+    // ==========================================
+
     match /users/{userId} {
-      // User profile document permissions (CRUD restricted strictly to document owner)
-      allow read: if isOwner(userId);
+      // Only the document owner may read, create, update, or delete their profile.
+      // delete is intentionally allowed so that the in-app account-deletion flow
+      // (settings_page.dart → .delete()) continues to work without Cloud Functions.
+      allow read:   if isOwner(userId);
       allow create: if isOwner(userId) && isImmutableUid(userId);
       allow update: if isOwner(userId) && isImmutableUid(userId);
       allow delete: if isOwner(userId);
 
-      // Subcollection: food_logs (Nutrition diary & logged meals)
+      // ----------------------------------------
+      // Subcollection: food_logs
+      // Nutritional diary & AI-scanned meal records.
+      // ----------------------------------------
       match /food_logs/{foodLogId} {
-        allow read, write: if isOwner(userId);
+        allow read, delete: if isOwner(userId);
+        allow create, update: if isOwner(userId) && validFoodLog();
       }
 
-      // Subcollection: workout_logs (Completed workout sessions & exercise logs)
+      // ----------------------------------------
+      // Subcollection: workout_logs
+      // Completed workout session history.
+      // ----------------------------------------
       match /workout_logs/{workoutLogId} {
-        allow read, write: if isOwner(userId);
+        allow read, delete: if isOwner(userId);
+        allow create, update: if isOwner(userId) && validWorkoutLog();
       }
 
-      // Subcollection: routines (User custom & AI-generated workout routines)
+      // ----------------------------------------
+      // Subcollection: routines
+      // Manual & AI-generated planned workout routines.
+      // ----------------------------------------
       match /routines/{routineId} {
         allow read, write: if isOwner(userId);
       }
 
-      // Subcollection: daily_logs (Aggregated daily tracking - steps, water, calories)
-      match /daily_logs/{dateStr} {
+      // ----------------------------------------
+      // Subcollection: measurements
+      // Body measurement history (weight, body fat, girth).
+      // ----------------------------------------
+      match /measurements/{measurementId} {
+        allow read, delete: if isOwner(userId);
+        allow create, update: if isOwner(userId) && validMeasurement();
+      }
+
+      // ----------------------------------------
+      // Subcollection: achievements
+      // Client-calculated milestone badges synced from AchievementService.
+      // NOTE: Achievement progress is computed and written by the Flutter client.
+      // A malicious modified client could self-award badges.  User isolation
+      // (no cross-user access) is enforced; however, per-badge value integrity
+      // is not verified server-side in this phase.  Cloud Functions-based
+      // authoritative achievement verification is recommended for production
+      // hardening post-FYP.
+      // ----------------------------------------
+      match /achievements/{achievementId} {
         allow read, write: if isOwner(userId);
+      }
+
+      // ----------------------------------------
+      // Subcollection: daily_logs  [DEPRECATED]
+      // No longer written or read by Flutter (deprecated 2026-09).
+      // Historical documents remain in Firestore untouched.
+      // New client writes and reads are denied to prevent stale usage.
+      // ----------------------------------------
+      match /daily_logs/{dateStr} {
+        allow read, write: if false;
       }
     }
 
     // ==========================================
-    // Default Deny Rule for Unknown Collections
+    // Default Deny
+    // Any collection or document not explicitly matched above is denied.
     // ==========================================
     match /{document=**} {
       allow read, write: if false;

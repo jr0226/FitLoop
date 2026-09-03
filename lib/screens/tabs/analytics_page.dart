@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:fl_chart/fl_chart.dart';
+import '../progress_measurements_screen.dart';
 
 class AnalyticsTab extends StatefulWidget {
   const AnalyticsTab({super.key});
@@ -46,7 +47,10 @@ class _AnalyticsTabState extends State<AnalyticsTab> {
 
       for (var doc in snapshot.docs) {
         final data = doc.data();
-        final DateTime date = (data['timestamp'] as Timestamp).toDate();
+        final dynamic rawDate = data['completedAt'] ?? data['timestamp'];
+        final DateTime date = rawDate is Timestamp
+            ? rawDate.toDate()
+            : (rawDate is DateTime ? rawDate : DateTime.now());
         final int burned = (data['caloriesBurned'] as num?)?.toInt() ?? 0;
         final int durationSecs = (data['durationSeconds'] as num?)?.toInt() ?? 0;
 
@@ -187,14 +191,20 @@ class _AnalyticsTabState extends State<AnalyticsTab> {
                       ),
                       const SizedBox(height: 10),
                       const Text(
-                        "Keep tracking your weights in the Active Session. Your 1-Rep Max insights will appear here soon!",
+                        "Track weight changes, body fat, and body circumferences with detailed progress charts.",
                         style: TextStyle(color: Colors.white70, fontSize: 14),
                       ),
                       const SizedBox(height: 16),
-                      ElevatedButton(
-                        onPressed: () {},
+                      ElevatedButton.icon(
+                        onPressed: () {
+                          Navigator.push(
+                            context,
+                            MaterialPageRoute(builder: (_) => const ProgressMeasurementsScreen()),
+                          );
+                        },
+                        icon: const Icon(Icons.straighten, size: 18),
                         style: ElevatedButton.styleFrom(backgroundColor: Colors.white, foregroundColor: Colors.teal),
-                        child: const Text("View Exercise Records"),
+                        label: const Text("View Body Measurements"),
                       )
                     ],
                   ),

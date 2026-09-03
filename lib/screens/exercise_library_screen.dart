@@ -1,6 +1,7 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import '../models/workout_models.dart';
-import '../mock/mock_workout_data.dart';
+import '../services/exercise_service.dart';
 import '../widgets/workout/exercise_list_card.dart';
 import '../widgets/workout/exercise_detail_modal.dart';
 
@@ -23,45 +24,155 @@ class _ExerciseLibraryScreenState extends State<ExerciseLibraryScreen> {
     'Back',
     'Legs',
     'Arms',
+    'Shoulders',
     'Core',
-    'Full Body',
+    'Cardio',
   ];
 
   String _selectedCategory = 'All';
   String _searchQuery = '';
   final TextEditingController _searchController = TextEditingController();
 
-  late final List<ExerciseModel> _allExercises;
+  List<ExerciseModel> _exercises = [];
+  bool _isLoading = false;
+  bool _hasError = false;
+  String _errorMessage = '';
+  Timer? _debounceTimer;
 
   @override
   void initState() {
     super.initState();
-    _allExercises = MockWorkoutData.comprehensiveExerciseLibrary;
+    _loadExercisesForCategory(_selectedCategory);
   }
 
   @override
   void dispose() {
+    _debounceTimer?.cancel();
     _searchController.dispose();
     super.dispose();
   }
 
+  String _mapCategoryToBodyPart(String category) {
+    switch (category.toLowerCase()) {
+      case 'chest':
+        return 'chest';
+      case 'back':
+        return 'back';
+      case 'legs':
+        return 'legs';
+      case 'arms':
+        return 'arms';
+      case 'shoulders':
+        return 'shoulders';
+      case 'core':
+        return 'core';
+      case 'cardio':
+        return 'cardio';
+      default:
+        return 'all';
+    }
+  }
+
+  Future<void> _loadExercisesForCategory(String category) async {
+    setState(() {
+      _isLoading = true;
+      _hasError = false;
+      _errorMessage = '';
+    });
+
+    try {
+      final bodyPart = _mapCategoryToBodyPart(category);
+      final rawList = await ExerciseService.getExercisesByBodyPart(bodyPart, limit: 40);
+
+      if (mounted) {
+        setState(() {
+          _exercises = rawList.map((e) {
+            if (e is Map<String, dynamic>) {
+              return ExerciseModel.fromJson(e);
+            } else if (e is Map) {
+              return ExerciseModel.fromJson(Map<String, dynamic>.from(e));
+            }
+            return ExerciseModel(id: '', name: e.toString(), targetMuscle: category, equipment: 'Bodyweight');
+          }).toList();
+          _isLoading = false;
+        });
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _isLoading = false;
+          _hasError = true;
+          _errorMessage = e.toString().replaceAll("Exception:", "").trim();
+        });
+      }
+    }
+  }
+
+  Future<void> _searchExercisesRemotely(String query) async {
+    final clean = query.trim();
+    if (clean.isEmpty) {
+      _loadExercisesForCategory(_selectedCategory);
+      return;
+    }
+
+    setState(() {
+      _isLoading = true;
+      _hasError = false;
+      _errorMessage = '';
+    });
+
+    try {
+      final rawList = await ExerciseService.searchExercises(clean, limit: 40);
+
+      if (mounted) {
+        setState(() {
+          _exercises = rawList.map((e) {
+            if (e is Map<String, dynamic>) {
+              return ExerciseModel.fromJson(e);
+            } else if (e is Map) {
+              return ExerciseModel.fromJson(Map<String, dynamic>.from(e));
+            }
+            return ExerciseModel(id: '', name: e.toString(), targetMuscle: 'General', equipment: 'Bodyweight');
+          }).toList();
+          _isLoading = false;
+        });
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _isLoading = false;
+          _hasError = true;
+          _errorMessage = e.toString().replaceAll("Exception:", "").trim();
+        });
+      }
+    }
+  }
+
+  void _onSearchChanged(String val) {
+    _searchQuery = val.trim();
+    _debounceTimer?.cancel();
+
+    if (_searchQuery.isEmpty) {
+      _loadExercisesForCategory(_selectedCategory);
+    } else {
+      _debounceTimer = Timer(const Duration(milliseconds: 500), () {
+        _searchExercisesRemotely(_searchQuery);
+      });
+    }
+  }
+
   List<ExerciseModel> get _filteredExercises {
-    return _allExercises.where((ex) {
-      final matchesCategory = _selectedCategory == 'All' ||
-          ex.targetMuscle.toLowerCase() == _selectedCategory.toLowerCase();
-      final matchesSearch = _searchQuery.isEmpty ||
-          ex.name.toLowerCase().contains(_searchQuery.toLowerCase()) ||
-          ex.equipment.toLowerCase().contains(_searchQuery.toLowerCase()) ||
-          ex.targetMuscle.toLowerCase().contains(_searchQuery.toLowerCase());
-      return matchesCategory && matchesSearch;
-    }).toList();
+    if (_searchQuery.isNotEmpty) {
+      return _exercises;
+    }
+    return _exercises;
   }
 
   void _openExerciseDetail(ExerciseModel exercise) {
     ExerciseDetailModal.show(
       context,
       exercise: exercise,
-      allLibraryExercises: _allExercises,
+      allLibraryExercises: _exercises,
       onSelectAlternative: (altExercise) {
         _openExerciseDetail(altExercise);
       },
@@ -94,7 +205,7 @@ class _ExerciseLibraryScreenState extends State<ExerciseLibraryScreen> {
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
             child: TextField(
               controller: _searchController,
-              onChanged: (val) => setState(() => _searchQuery = val.trim()),
+              onChanged: _onSearchChanged,
               decoration: InputDecoration(
                 hintText: "Search movements, equipment, muscles...",
                 prefixIcon: const Icon(Icons.search, color: Colors.teal),
@@ -103,7 +214,7 @@ class _ExerciseLibraryScreenState extends State<ExerciseLibraryScreen> {
                         icon: const Icon(Icons.clear, size: 18),
                         onPressed: () {
                           _searchController.clear();
-                          setState(() => _searchQuery = '');
+                          _onSearchChanged('');
                         },
                       )
                     : null,
@@ -127,7 +238,7 @@ class _ExerciseLibraryScreenState extends State<ExerciseLibraryScreen> {
               padding: const EdgeInsets.symmetric(horizontal: 16),
               child: Row(
                 children: _categories.map((cat) {
-                  final isSelected = _selectedCategory == cat;
+                  final isSelected = _selectedCategory == cat && _searchQuery.isEmpty;
                   return Padding(
                     padding: const EdgeInsets.only(right: 8),
                     child: FilterChip(
@@ -148,7 +259,12 @@ class _ExerciseLibraryScreenState extends State<ExerciseLibraryScreen> {
                         ),
                       ),
                       onSelected: (_) {
-                        setState(() => _selectedCategory = cat);
+                        _searchController.clear();
+                        setState(() {
+                          _searchQuery = '';
+                          _selectedCategory = cat;
+                        });
+                        _loadExercisesForCategory(cat);
                       },
                     ),
                   );
@@ -166,7 +282,9 @@ class _ExerciseLibraryScreenState extends State<ExerciseLibraryScreen> {
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
                 Text(
-                  "SHOWING ${filtered.length} MOVEMENTS",
+                  _isLoading
+                      ? "FETCHING EXERCISES..."
+                      : "SHOWING ${filtered.length} MOVEMENTS",
                   style: TextStyle(
                     fontSize: 11,
                     fontWeight: FontWeight.bold,
@@ -174,9 +292,16 @@ class _ExerciseLibraryScreenState extends State<ExerciseLibraryScreen> {
                     color: Colors.grey.shade600,
                   ),
                 ),
-                if (_selectedCategory != 'All')
+                if (_selectedCategory != 'All' || _searchQuery.isNotEmpty)
                   InkWell(
-                    onTap: () => setState(() => _selectedCategory = 'All'),
+                    onTap: () {
+                      _searchController.clear();
+                      setState(() {
+                        _searchQuery = '';
+                        _selectedCategory = 'All';
+                      });
+                      _loadExercisesForCategory('All');
+                    },
                     child: Text(
                       "Clear Filter",
                       style: TextStyle(
@@ -190,39 +315,107 @@ class _ExerciseLibraryScreenState extends State<ExerciseLibraryScreen> {
             ),
           ),
 
-          // 4. Exercise List Cards
+          // 4. Exercise List Cards / Loading / Error / Empty States
           Expanded(
-            child: filtered.isEmpty
-                ? Center(
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Icon(Icons.search_off_rounded, size: 54, color: Colors.grey.shade400),
-                        const SizedBox(height: 12),
-                        Text(
-                          "No exercises found for '$_searchQuery'",
-                          style: TextStyle(color: Colors.grey.shade700, fontSize: 14),
-                        ),
-                      ],
-                    ),
-                  )
-                : ListView.builder(
-                    padding: const EdgeInsets.only(bottom: 24),
-                    itemCount: filtered.length,
-                    itemBuilder: (context, index) {
-                      final ex = filtered[index];
-                      return ExerciseListCard(
-                        exercise: ex,
-                        onTap: () => _openExerciseDetail(ex),
-                        onAdd: widget.onSelectExerciseForWorkout != null
-                            ? () => widget.onSelectExerciseForWorkout!(ex)
-                            : null,
-                      );
-                    },
-                  ),
+            child: _buildBody(filtered),
           ),
         ],
       ),
+    );
+  }
+
+  Widget _buildBody(List<ExerciseModel> filtered) {
+    if (_isLoading) {
+      return const Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            CircularProgressIndicator(color: Colors.teal),
+            SizedBox(height: 16),
+            Text(
+              "Loading exercises from backend...",
+              style: TextStyle(color: Colors.black54, fontSize: 13),
+            ),
+          ],
+        ),
+      );
+    }
+
+    if (_hasError) {
+      return Center(
+        child: Padding(
+          padding: const EdgeInsets.all(24.0),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              const Icon(Icons.cloud_off_rounded, color: Colors.orange, size: 54),
+              const SizedBox(height: 16),
+              const Text(
+                "Exercise Service Unavailable",
+                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                _errorMessage.isNotEmpty
+                    ? _errorMessage
+                    : "Could not connect to exercise service. Please check your network or backend connection.",
+                textAlign: TextAlign.center,
+                style: TextStyle(color: Colors.grey.shade600, fontSize: 13),
+              ),
+              const SizedBox(height: 20),
+              ElevatedButton.icon(
+                onPressed: () {
+                  if (_searchQuery.isNotEmpty) {
+                    _searchExercisesRemotely(_searchQuery);
+                  } else {
+                    _loadExercisesForCategory(_selectedCategory);
+                  }
+                },
+                icon: const Icon(Icons.refresh_rounded, size: 18),
+                label: const Text("Retry"),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.teal,
+                  foregroundColor: Colors.white,
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
+    if (filtered.isEmpty) {
+      return Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(Icons.search_off_rounded, size: 54, color: Colors.grey.shade400),
+            const SizedBox(height: 12),
+            Text(
+              _searchQuery.isNotEmpty
+                  ? "No exercises found for '$_searchQuery'"
+                  : "No exercises found in category '$_selectedCategory'",
+              style: TextStyle(color: Colors.grey.shade700, fontSize: 14),
+            ),
+          ],
+        ),
+      );
+    }
+
+    return ListView.builder(
+      padding: const EdgeInsets.only(bottom: 24),
+      itemCount: filtered.length,
+      itemBuilder: (context, index) {
+        final ex = filtered[index];
+        return ExerciseListCard(
+          exercise: ex,
+          onTap: () => _openExerciseDetail(ex),
+          onAdd: widget.onSelectExerciseForWorkout != null
+              ? () => widget.onSelectExerciseForWorkout!(ex)
+              : null,
+        );
+      },
     );
   }
 }

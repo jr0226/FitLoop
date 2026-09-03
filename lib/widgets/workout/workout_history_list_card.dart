@@ -120,19 +120,19 @@ class _WorkoutHistoryListCardState extends State<WorkoutHistoryListCard> {
 
                     const SizedBox(height: 8),
 
-                    // Stats row (Volume + Total Sets + Calories)
-                    Row(
+                    // Stats row (Volume + Total Sets + Calories) — Wrap prevents overflow
+                    Wrap(
+                      spacing: 10,
+                      runSpacing: 4,
                       children: [
                         Text(
                           "Volume: ${s.totalVolumeKg.toInt()} kg",
                           style: TextStyle(fontSize: 12, color: Colors.grey.shade700, fontWeight: FontWeight.w500),
                         ),
-                        const SizedBox(width: 10),
                         Text(
                           "•  ${s.totalSets} sets",
                           style: TextStyle(fontSize: 12, color: Colors.grey.shade700, fontWeight: FontWeight.w500),
                         ),
-                        const SizedBox(width: 10),
                         Text(
                           "•  ${s.caloriesBurned} kcal",
                           style: TextStyle(fontSize: 12, color: Colors.orange.shade800, fontWeight: FontWeight.w600),
@@ -225,11 +225,16 @@ class _WorkoutHistoryListCardState extends State<WorkoutHistoryListCard> {
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              Text(
-                ex.exerciseName,
-                style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold),
+              Expanded(
+                child: Text(
+                  ex.exerciseName,
+                  style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold),
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                ),
               ),
-              if (ex.hasPersonalRecord)
+              if (ex.hasPersonalRecord) ...[
+                const SizedBox(width: 6),
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                   decoration: BoxDecoration(
@@ -241,6 +246,7 @@ class _WorkoutHistoryListCardState extends State<WorkoutHistoryListCard> {
                     style: TextStyle(fontSize: 9, fontWeight: FontWeight.bold, color: Colors.orange),
                   ),
                 ),
+              ],
             ],
           ),
           const SizedBox(height: 6),

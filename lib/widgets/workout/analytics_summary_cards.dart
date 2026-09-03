@@ -40,28 +40,34 @@ class AnalyticsSummaryCards extends StatelessWidget {
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
-                    Row(
-                      children: [
-                        Container(
-                          padding: const EdgeInsets.all(8),
-                          decoration: BoxDecoration(
-                            color: Colors.white.withValues(alpha: 0.2),
-                            borderRadius: BorderRadius.circular(10),
+                    Flexible(
+                      child: Row(
+                        children: [
+                          Container(
+                            padding: const EdgeInsets.all(8),
+                            decoration: BoxDecoration(
+                              color: Colors.white.withValues(alpha: 0.2),
+                              borderRadius: BorderRadius.circular(10),
+                            ),
+                            child: const Icon(Icons.fitness_center_rounded, color: Colors.white, size: 20),
                           ),
-                          child: const Icon(Icons.fitness_center_rounded, color: Colors.white, size: 20),
-                        ),
-                        const SizedBox(width: 10),
-                        const Text(
-                          "TOTAL VOLUME LIFTED",
-                          style: TextStyle(
-                            color: Colors.white70,
-                            fontSize: 11,
-                            fontWeight: FontWeight.w800,
-                            letterSpacing: 1.1,
+                          const SizedBox(width: 10),
+                          const Flexible(
+                            child: Text(
+                              "TOTAL VOLUME LIFTED",
+                              style: TextStyle(
+                                color: Colors.white70,
+                                fontSize: 11,
+                                fontWeight: FontWeight.w800,
+                                letterSpacing: 1.1,
+                              ),
+                              overflow: TextOverflow.ellipsis,
+                            ),
                           ),
-                        ),
-                      ],
+                        ],
+                      ),
                     ),
+                    const SizedBox(width: 8),
                     Container(
                       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                       decoration: BoxDecoration(
@@ -69,11 +75,12 @@ class AnalyticsSummaryCards extends StatelessWidget {
                         borderRadius: BorderRadius.circular(8),
                       ),
                       child: Row(
+                        mainAxisSize: MainAxisSize.min,
                         children: [
                           const Icon(Icons.trending_up_rounded, color: Colors.amberAccent, size: 14),
                           const SizedBox(width: 4),
                           Text(
-                            "+${summary.volumeGrowthPercentage}% this month",
+                            "+${summary.volumeGrowthPercentage}%",
                             style: const TextStyle(
                               color: Colors.white,
                               fontSize: 11,

@@ -9,89 +9,67 @@ class WorkoutStreakHeader extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     const daysOfWeek = ['M', 'T', 'W', 'T', 'F', 'S', 'S'];
+    final now = DateTime.now();
+    final todayWeekdayIndex = (now.weekday - 1).clamp(0, 6);
 
     return Container(
       margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-      padding: const EdgeInsets.all(18),
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
       decoration: BoxDecoration(
-        gradient: LinearGradient(
-          colors: [
-            Colors.teal.shade800,
-            Colors.teal.shade600,
-          ],
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-        ),
-        borderRadius: BorderRadius.circular(20),
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: Colors.grey.shade200),
         boxShadow: [
           BoxShadow(
-            color: Colors.teal.withValues(alpha: 0.3),
-            blurRadius: 12,
-            offset: const Offset(0, 6),
+            color: Colors.black.withValues(alpha: 0.03),
+            blurRadius: 8,
+            offset: const Offset(0, 2),
           ),
         ],
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Row 1: Streak Badge + Target Summary
+          // Row 1: Streak stats + Weekly goal badge
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
+              // Left: Flame icon + Streak text
               Expanded(
                 child: Row(
                   children: [
                     Container(
-                      padding: const EdgeInsets.all(10),
+                      padding: const EdgeInsets.all(6),
                       decoration: BoxDecoration(
-                        color: Colors.orange.withValues(alpha: 0.2),
+                        color: Colors.orange.shade50,
                         shape: BoxShape.circle,
-                        border: Border.all(color: Colors.orangeAccent, width: 1.5),
                       ),
                       child: const Icon(
                         Icons.local_fire_department_rounded,
-                        color: Colors.orangeAccent,
-                        size: 24,
+                        color: Colors.orange,
+                        size: 20,
                       ),
                     ),
-                    const SizedBox(width: 10),
+                    const SizedBox(width: 8),
                     Expanded(
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Row(
-                            crossAxisAlignment: CrossAxisAlignment.baseline,
-                            textBaseline: TextBaseline.alphabetic,
-                            children: [
-                              Text(
-                                '${streakSummary.currentStreakDays}',
-                                style: const TextStyle(
-                                  fontSize: 24,
-                                  fontWeight: FontWeight.w900,
-                                  color: Colors.white,
-                                ),
-                              ),
-                              const SizedBox(width: 4),
-                              const Flexible(
-                                child: Text(
-                                  'DAYS STREAK',
-                                  style: TextStyle(
-                                    fontSize: 11,
-                                    fontWeight: FontWeight.bold,
-                                    color: Colors.white70,
-                                    letterSpacing: 1.0,
-                                  ),
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                ),
-                              ),
-                            ],
+                          Text(
+                            "${streakSummary.currentStreakDays} Day Streak",
+                            style: const TextStyle(
+                              fontSize: 14,
+                              fontWeight: FontWeight.bold,
+                              color: Colors.black87,
+                            ),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
                           ),
                           Text(
-                            'Best: ${streakSummary.bestStreakDays} days 🔥',
+                            "Best: ${streakSummary.bestStreakDays} days",
                             style: TextStyle(
                               fontSize: 11,
-                              color: Colors.teal.shade100,
+                              color: Colors.grey.shade500,
                               fontWeight: FontWeight.w500,
                             ),
                             maxLines: 1,
@@ -103,24 +81,26 @@ class WorkoutStreakHeader extends StatelessWidget {
                   ],
                 ),
               ),
+
               const SizedBox(width: 8),
-              // Weekly goal count chip
+
+              // Right: Weekly Target Pill
               Container(
-                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
                 decoration: BoxDecoration(
-                  color: Colors.white.withValues(alpha: 0.15),
-                  borderRadius: BorderRadius.circular(12),
-                  border: Border.all(color: Colors.white24),
+                  color: Colors.teal.shade50,
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(color: Colors.teal.shade200),
                 ),
                 child: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    const Icon(Icons.check_circle_outline, color: Colors.white, size: 14),
-                    const SizedBox(width: 4),
+                    const Icon(Icons.fitness_center_rounded, color: Colors.teal, size: 14),
+                    const SizedBox(width: 5),
                     Text(
-                      '${streakSummary.weeklyCompletedDays}/${streakSummary.weeklyGoalDays} Days',
-                      style: const TextStyle(
-                        color: Colors.white,
+                      "${streakSummary.weeklyCompletedDays}/${streakSummary.weeklyGoalDays} Days",
+                      style: TextStyle(
+                        color: Colors.teal.shade800,
                         fontWeight: FontWeight.bold,
                         fontSize: 11,
                       ),
@@ -131,129 +111,57 @@ class WorkoutStreakHeader extends StatelessWidget {
             ],
           ),
 
-          const SizedBox(height: 18),
+          const SizedBox(height: 10),
+          Divider(height: 1, color: Colors.grey.shade100),
+          const SizedBox(height: 8),
 
-          // Row 2: 7-Day Mini Calendar Bubbles
+          // Row 2: Compact 7-Day Dots Indicator
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: List.generate(7, (index) {
               final isActive = index < streakSummary.pastWeekActiveDays.length &&
                   streakSummary.pastWeekActiveDays[index];
-              final isToday = index == 4; // Mock today (Friday)
+              final isToday = index == todayWeekdayIndex;
 
               return Column(
                 children: [
                   Text(
                     daysOfWeek[index],
                     style: TextStyle(
-                      color: isToday ? Colors.amberAccent : Colors.white70,
+                      color: isToday ? Colors.teal : Colors.grey.shade500,
                       fontWeight: isToday ? FontWeight.bold : FontWeight.normal,
-                      fontSize: 11,
+                      fontSize: 10,
                     ),
                   ),
-                  const SizedBox(height: 6),
+                  const SizedBox(height: 4),
                   Container(
-                    width: 32,
-                    height: 32,
+                    width: 22,
+                    height: 22,
                     decoration: BoxDecoration(
                       color: isActive
-                          ? Colors.orangeAccent
-                          : Colors.white.withValues(alpha: 0.15),
+                          ? Colors.teal
+                          : (isToday ? Colors.teal.shade50 : Colors.grey.shade100),
                       shape: BoxShape.circle,
                       border: isToday
-                          ? Border.all(color: Colors.amberAccent, width: 2)
+                          ? Border.all(color: Colors.teal, width: 1.5)
                           : null,
                     ),
                     child: Center(
                       child: isActive
-                          ? const Icon(Icons.check, size: 18, color: Colors.black87)
-                          : Text(
-                              '${index + 1}',
-                              style: const TextStyle(color: Colors.white60, fontSize: 11),
+                          ? const Icon(Icons.check, size: 13, color: Colors.white)
+                          : Container(
+                              width: 5,
+                              height: 5,
+                              decoration: BoxDecoration(
+                                color: isToday ? Colors.teal : Colors.grey.shade300,
+                                shape: BoxShape.circle,
+                              ),
                             ),
                     ),
                   ),
                 ],
               );
             }),
-          ),
-
-          const SizedBox(height: 16),
-
-          // Row 3: Linear Weekly Goal Progress Bar
-          Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  const Text(
-                    'Weekly Target Progress',
-                    style: TextStyle(color: Colors.white70, fontSize: 12),
-                  ),
-                  Text(
-                    '${(streakSummary.weeklyProgress * 100).toInt()}%',
-                    style: const TextStyle(
-                      color: Colors.white,
-                      fontWeight: FontWeight.bold,
-                      fontSize: 12,
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 6),
-              ClipRRect(
-                borderRadius: BorderRadius.circular(6),
-                child: LinearProgressIndicator(
-                  value: streakSummary.weeklyProgress,
-                  minHeight: 7,
-                  backgroundColor: Colors.black26,
-                  valueColor: const AlwaysStoppedAnimation<Color>(Colors.amberAccent),
-                ),
-              ),
-            ],
-          ),
-
-          const SizedBox(height: 16),
-
-          // Row 4: Milestone Badges Strip
-          SingleChildScrollView(
-            scrollDirection: Axis.horizontal,
-            child: Row(
-              children: streakSummary.badges.map((badge) {
-                return Container(
-                  margin: const EdgeInsets.only(right: 8),
-                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                  decoration: BoxDecoration(
-                    color: badge.isUnlocked
-                        ? Colors.white.withValues(alpha: 0.2)
-                        : Colors.black.withValues(alpha: 0.15),
-                    borderRadius: BorderRadius.circular(10),
-                    border: Border.all(
-                      color: badge.isUnlocked ? badge.color.withValues(alpha: 0.6) : Colors.white12,
-                    ),
-                  ),
-                  child: Row(
-                    children: [
-                      Icon(
-                        badge.icon,
-                        size: 15,
-                        color: badge.isUnlocked ? badge.color : Colors.white38,
-                      ),
-                      const SizedBox(width: 6),
-                      Text(
-                        badge.title,
-                        style: TextStyle(
-                          fontSize: 11,
-                          fontWeight: FontWeight.w600,
-                          color: badge.isUnlocked ? Colors.white : Colors.white38,
-                        ),
-                      ),
-                    ],
-                  ),
-                );
-              }).toList(),
-            ),
           ),
         ],
       ),

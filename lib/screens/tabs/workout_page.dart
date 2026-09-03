@@ -36,9 +36,10 @@ class _WorkoutTabState extends State<WorkoutTab> {
     final user = FirebaseAuth.instance.currentUser;
     if (user != null) {
       final doc = await FirebaseFirestore.instance.collection('users').doc(user.uid).get();
-      if (mounted) {
+      if (mounted && doc.exists) {
+        final data = doc.data() ?? {};
         setState(() {
-          _userGoal = doc.data()?['goal'] ?? "Maintenance";
+          _userGoal = data['fitnessGoal'] ?? data['goal'] ?? "Maintenance";
         });
       }
     }
@@ -92,19 +93,105 @@ class _WorkoutTabState extends State<WorkoutTab> {
     ).then((_) => isDialogOpen = false); 
 
     try {
+      final user = FirebaseAuth.instance.currentUser;
+      final uid = user?.uid;
+      if (uid == null) throw Exception("User not authenticated.");
+
+      final userDoc = await FirebaseFirestore.instance.collection('users').doc(uid).get();
+      final userData = userDoc.data() ?? {};
+      final String effectiveGoal = userData['fitnessGoal'] ?? userData['goal'] ?? _userGoal;
+      final String effectiveDifficulty = userData['fitnessLevel'] ?? userData['level'] ?? _difficulty;
+      List<String> equipment = [];
+      if (userData['equipment'] is List) {
+        equipment = List<String>.from((userData['equipment'] as List).map((e) => e.toString()));
+      }
+      List<String> preferredWorkoutTypes = [];
+      if (userData['preferredWorkoutTypes'] is List) {
+        preferredWorkoutTypes = List<String>.from((userData['preferredWorkoutTypes'] as List).map((e) => e.toString()));
+      }
+
+      // Compact 7-day workout history summary
+      String? recentSummary;
+      try {
+        final sevenDaysAgo = DateTime.now().subtract(const Duration(days: 7));
+        final recentLogsSnap = await FirebaseFirestore.instance
+            .collection('users')
+            .doc(uid)
+            .collection('workout_logs')
+            .where('timestamp', isGreaterThanOrEqualTo: Timestamp.fromDate(sevenDaysAgo))
+            .limit(15)
+            .get();
+
+        if (recentLogsSnap.docs.isNotEmpty) {
+          final Map<String, int> counts = {};
+          for (var doc in recentLogsSnap.docs) {
+            final data = doc.data();
+            final String type = (data['workoutType'] ?? data['category'] ?? data['routineName'] ?? 'Workout').toString();
+            counts[type] = (counts[type] ?? 0) + 1;
+          }
+          final parts = counts.entries.map((e) => '${e.key}: ${e.value} session${e.value > 1 ? 's' : ''}').toList();
+          recentSummary = 'Recent 7 days: ${parts.join(', ')}';
+        }
+      } catch (err) {
+        debugPrint('Note: Could not query recent workout history for AI: $err');
+      }
+
       final List<Map<String, dynamic>> generatedRoutines = await AiService.generateWorkoutPlan(
-        userGoal: _userGoal,
-        difficulty: _difficulty,
+        userGoal: effectiveGoal,
+        difficulty: effectiveDifficulty,
+        equipment: equipment,
+        preferredWorkoutTypes: preferredWorkoutTypes,
+        recentWorkoutsSummary: recentSummary,
       );
 
-      final uid = FirebaseAuth.instance.currentUser!.uid;
       final batch = FirebaseFirestore.instance.batch();
       
       for (var routine in generatedRoutines) {
         final docRef = FirebaseFirestore.instance.collection('users').doc(uid).collection('routines').doc();
+        final String routineName = routine['name'] ?? routine['routineName'] ?? 'Workout Routine';
+        final String routineLevel = routine['fitnessLevel'] ?? routine['level'] ?? _difficulty;
+        final String routineCategory = routine['category'] ?? 'Full Body';
+        final String routineImage = routine['imageUrl'] ?? routine['image'] ?? 'https://images.unsplash.com/photo-1517836357463-d25dfeac3438?w=400';
+        final List<dynamic> rawExercises = routine['exercises'] ?? [];
+
+        final List<Map<String, dynamic>> normalizedExercises = rawExercises.map((e) {
+          if (e is Map) {
+            final String exName = e['name'] ?? e['exerciseName'] ?? 'Exercise';
+            final String target = e['target'] ?? e['category'] ?? 'Full Body';
+            final String equipment = e['equipment'] ?? 'General';
+            final String setsReps = e['sets']?.toString() ?? '3 sets x 10 reps';
+            final String instructions = e['instructions'] ?? e['desc'] ?? '';
+            final String exImage = e['imageUrl'] ?? e['image'] ?? '';
+
+            return {
+              'name': exName,
+              'exerciseName': exName, // Legacy compatibility
+              'target': target,
+              'category': target, // Legacy compatibility
+              'equipment': equipment,
+              'sets': setsReps,
+              'instructions': instructions,
+              'desc': instructions, // Legacy compatibility
+              if (exImage.isNotEmpty) 'imageUrl': exImage,
+              if (exImage.isNotEmpty) 'image': exImage, // Legacy compatibility
+            };
+          }
+          return {'name': e.toString(), 'exerciseName': e.toString()};
+        }).toList();
+
         batch.set(docRef, {
-          ...routine,
+          'name': routineName,
+          'routineName': routineName, // Legacy compatibility dual-write
+          'category': routineCategory,
+          'fitnessGoal': _userGoal,
+          'fitnessLevel': routineLevel,
+          'level': routineLevel, // Legacy compatibility dual-write
+          'source': 'ai_generated',
+          'imageUrl': routineImage,
+          'image': routineImage, // Legacy compatibility dual-write
+          'exercises': normalizedExercises,
           'createdAt': FieldValue.serverTimestamp(),
+          'updatedAt': FieldValue.serverTimestamp(),
         });
       }
       await batch.commit();
@@ -320,9 +407,7 @@ class _WorkoutTabState extends State<WorkoutTab> {
         // Live Stream of User's Routines
         Expanded(
           child: StreamBuilder<QuerySnapshot>(
-            stream: FirebaseFirestore.instance.collection('users').doc(uid).collection('routines')
-                .where('level', isEqualTo: _difficulty)
-                .snapshots(),
+            stream: FirebaseFirestore.instance.collection('users').doc(uid).collection('routines').snapshots(),
             builder: (context, snapshot) {
               if (snapshot.connectionState == ConnectionState.waiting) {
                 return const Center(child: CircularProgressIndicator(color: Colors.teal));
@@ -330,10 +415,17 @@ class _WorkoutTabState extends State<WorkoutTab> {
 
               final docs = snapshot.data?.docs ?? [];
               
+              // Filter for difficulty level (supporting both fitnessLevel and legacy level)
+              final difficultyDocs = docs.where((d) {
+                final data = d.data() as Map<String, dynamic>;
+                final String level = data['fitnessLevel'] ?? data['level'] ?? 'Beginner';
+                return level.toLowerCase() == _difficulty.toLowerCase();
+              }).toList();
+
               // Local filtering for category
               final filteredDocs = _selectedCategory == "All" 
-                ? docs 
-                : docs.where((d) => (d.data() as Map<String, dynamic>)['category'] == _selectedCategory).toList();
+                ? difficultyDocs 
+                : difficultyDocs.where((d) => (d.data() as Map<String, dynamic>)['category'] == _selectedCategory).toList();
 
               if (filteredDocs.isEmpty) {
                 return Center(
@@ -369,6 +461,11 @@ class _WorkoutTabState extends State<WorkoutTab> {
                 itemBuilder: (context, index) {
                   final routineId = filteredDocs[index].id;
                   final routine = filteredDocs[index].data() as Map<String, dynamic>;
+                  final String routineName = routine["name"] ?? routine["routineName"] ?? "Routine";
+                  final String routineCategory = routine["category"] ?? "Workout";
+                  final String routineImage = routine["imageUrl"] ?? routine["image"] ?? "https://images.unsplash.com/photo-1517836357463-d25dfeac3438?w=400";
+                  final String routineLevel = routine["fitnessLevel"] ?? routine["level"] ?? _difficulty;
+                  final String routineGoal = routine["fitnessGoal"] ?? _userGoal;
                   final List<dynamic> exercises = routine["exercises"] ?? [];
                   
                   return GestureDetector(
@@ -377,8 +474,12 @@ class _WorkoutTabState extends State<WorkoutTab> {
                         context,
                         MaterialPageRoute(
                           builder: (context) => ActiveWorkoutPage(
-                            workoutName: routine["routineName"],
+                            workoutName: routineName,
                             routine: List<Map<String, dynamic>>.from(exercises),
+                            routineId: routineId,
+                            workoutType: routineCategory,
+                            fitnessGoal: routineGoal,
+                            fitnessLevel: routineLevel,
                           ),
                         ),
                       );
@@ -389,9 +490,9 @@ class _WorkoutTabState extends State<WorkoutTab> {
                       decoration: BoxDecoration(
                         borderRadius: BorderRadius.circular(20),
                         image: DecorationImage(
-                          image: NetworkImage(routine["image"] ?? "https://images.unsplash.com/photo-1517836357463-d25dfeac3438?w=400"), 
+                          image: NetworkImage(routineImage), 
                           fit: BoxFit.cover,
-                          colorFilter: ColorFilter.mode(Colors.black.withOpacity(0.5), BlendMode.darken), 
+                          colorFilter: ColorFilter.mode(Colors.black.withValues(alpha: 0.5), BlendMode.darken), 
                         ),
                         boxShadow: const [BoxShadow(color: Colors.black12, blurRadius: 8, offset: Offset(0, 4))],
                       ),
@@ -406,10 +507,10 @@ class _WorkoutTabState extends State<WorkoutTab> {
                                 Container(
                                   padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                                   decoration: BoxDecoration(color: Colors.white24, borderRadius: BorderRadius.circular(8)),
-                                  child: Text(routine["category"] ?? "Workout", style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold)),
+                                  child: Text(routineCategory, style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold)),
                                 ),
                                 const SizedBox(height: 8),
-                                Text(routine["routineName"] ?? "Routine", style: const TextStyle(color: Colors.white, fontSize: 22, fontWeight: FontWeight.bold)),
+                                Text(routineName, style: const TextStyle(color: Colors.white, fontSize: 22, fontWeight: FontWeight.bold)),
                                 const SizedBox(height: 4),
                                 Row(
                                   children: [

@@ -74,6 +74,7 @@ class _ForgotPasswordModalState extends State<ForgotPasswordModal> {
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
     final bottomInset = MediaQuery.of(context).viewInsets.bottom;
 
     return Container(
@@ -83,9 +84,9 @@ class _ForgotPasswordModalState extends State<ForgotPasswordModal> {
         top: 24,
         bottom: bottomInset + 24,
       ),
-      decoration: const BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      decoration: BoxDecoration(
+        color: theme.cardColor,
+        borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
       ),
       child: AnimatedSwitcher(
         duration: const Duration(milliseconds: 300),
@@ -95,6 +96,7 @@ class _ForgotPasswordModalState extends State<ForgotPasswordModal> {
   }
 
   Widget _buildFormView() {
+    final theme = Theme.of(context);
     return Form(
       key: _formKey,
       child: Column(
@@ -106,7 +108,7 @@ class _ForgotPasswordModalState extends State<ForgotPasswordModal> {
               width: 40,
               height: 4,
               decoration: BoxDecoration(
-                color: Colors.grey.shade300,
+                color: theme.colorScheme.outlineVariant,
                 borderRadius: BorderRadius.circular(2),
               ),
             ),
@@ -117,13 +119,15 @@ class _ForgotPasswordModalState extends State<ForgotPasswordModal> {
               Container(
                 padding: const EdgeInsets.all(10),
                 decoration: BoxDecoration(
-                  color: Colors.teal.shade50,
+                  color: theme.brightness == Brightness.dark
+                      ? theme.colorScheme.surfaceContainerHighest
+                      : Colors.teal.shade50,
                   shape: BoxShape.circle,
                 ),
-                child: const Icon(Icons.lock_reset, color: Colors.teal, size: 28),
+                child: Icon(Icons.lock_reset, color: theme.colorScheme.primary, size: 28),
               ),
               const SizedBox(width: 14),
-              const Expanded(
+              Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
@@ -132,13 +136,13 @@ class _ForgotPasswordModalState extends State<ForgotPasswordModal> {
                       style: TextStyle(
                         fontSize: 20,
                         fontWeight: FontWeight.bold,
-                        color: Colors.black87,
+                        color: theme.colorScheme.onSurface,
                       ),
                     ),
-                    SizedBox(height: 2),
+                    const SizedBox(height: 2),
                     Text(
                       'Enter your email to receive a password reset link.',
-                      style: TextStyle(fontSize: 13, color: Colors.grey),
+                      style: TextStyle(fontSize: 13, color: theme.colorScheme.onSurfaceVariant),
                     ),
                   ],
                 ),
@@ -150,9 +154,9 @@ class _ForgotPasswordModalState extends State<ForgotPasswordModal> {
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
               decoration: BoxDecoration(
-                color: Colors.red.shade50,
+                color: Colors.red.shade50.withValues(alpha: 0.2),
                 borderRadius: BorderRadius.circular(10),
-                border: Border.all(color: Colors.red.shade200),
+                border: Border.all(color: Colors.red.shade300),
               ),
               child: Row(
                 children: [
@@ -161,7 +165,7 @@ class _ForgotPasswordModalState extends State<ForgotPasswordModal> {
                   Expanded(
                     child: Text(
                       _errorMessage!,
-                      style: TextStyle(color: Colors.red.shade800, fontSize: 13),
+                      style: TextStyle(color: Colors.red.shade400, fontSize: 13),
                     ),
                   ),
                 ],
@@ -173,14 +177,15 @@ class _ForgotPasswordModalState extends State<ForgotPasswordModal> {
             controller: _emailController,
             keyboardType: TextInputType.emailAddress,
             autofocus: true,
+            style: TextStyle(color: theme.colorScheme.onSurface),
             decoration: InputDecoration(
               labelText: 'Email Address',
               hintText: 'name@example.com',
-              prefixIcon: const Icon(Icons.email_outlined, color: Colors.teal),
+              prefixIcon: Icon(Icons.email_outlined, color: theme.colorScheme.primary),
               border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
               focusedBorder: OutlineInputBorder(
                 borderRadius: BorderRadius.circular(12),
-                borderSide: const BorderSide(color: Colors.teal, width: 2),
+                borderSide: BorderSide(color: theme.colorScheme.primary, width: 2),
               ),
             ),
             validator: (val) {
@@ -200,8 +205,8 @@ class _ForgotPasswordModalState extends State<ForgotPasswordModal> {
             child: ElevatedButton(
               onPressed: _isLoading ? null : _handleReset,
               style: ElevatedButton.styleFrom(
-                backgroundColor: Colors.teal,
-                foregroundColor: Colors.white,
+                backgroundColor: theme.colorScheme.primary,
+                foregroundColor: theme.brightness == Brightness.dark ? Colors.black : Colors.white,
                 shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(12),
                 ),
@@ -227,7 +232,7 @@ class _ForgotPasswordModalState extends State<ForgotPasswordModal> {
             onPressed: () => Navigator.pop(context),
             child: Text(
               'Cancel',
-              style: TextStyle(color: Colors.grey.shade700),
+              style: TextStyle(color: theme.colorScheme.onSurfaceVariant),
             ),
           ),
         ],
@@ -236,6 +241,7 @@ class _ForgotPasswordModalState extends State<ForgotPasswordModal> {
   }
 
   Widget _buildSuccessView() {
+    final theme = Theme.of(context);
     return Column(
       mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -245,7 +251,7 @@ class _ForgotPasswordModalState extends State<ForgotPasswordModal> {
             width: 40,
             height: 4,
             decoration: BoxDecoration(
-              color: Colors.grey.shade300,
+              color: theme.colorScheme.outlineVariant,
               borderRadius: BorderRadius.circular(2),
             ),
           ),
@@ -255,23 +261,23 @@ class _ForgotPasswordModalState extends State<ForgotPasswordModal> {
           child: Container(
             padding: const EdgeInsets.all(16),
             decoration: BoxDecoration(
-              color: Colors.green.shade50,
+              color: Colors.green.shade50.withValues(alpha: 0.2),
               shape: BoxShape.circle,
             ),
             child: const Icon(Icons.mark_email_read_outlined, color: Colors.green, size: 50),
           ),
         ),
         const SizedBox(height: 20),
-        const Text(
+        Text(
           'Check Your Email',
           textAlign: TextAlign.center,
-          style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+          style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: theme.colorScheme.onSurface),
         ),
         const SizedBox(height: 10),
         Text(
           'We have sent password reset instructions to:\n${_emailController.text.trim()}',
           textAlign: TextAlign.center,
-          style: TextStyle(fontSize: 14, color: Colors.grey.shade700, height: 1.4),
+          style: TextStyle(fontSize: 14, color: theme.colorScheme.onSurfaceVariant, height: 1.4),
         ),
         const SizedBox(height: 30),
         SizedBox(
@@ -279,8 +285,8 @@ class _ForgotPasswordModalState extends State<ForgotPasswordModal> {
           child: ElevatedButton(
             onPressed: () => Navigator.pop(context),
             style: ElevatedButton.styleFrom(
-              backgroundColor: Colors.teal,
-              foregroundColor: Colors.white,
+              backgroundColor: theme.colorScheme.primary,
+              foregroundColor: theme.brightness == Brightness.dark ? Colors.black : Colors.white,
               shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(12),
               ),

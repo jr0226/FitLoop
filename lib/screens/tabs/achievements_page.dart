@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import '../../services/achievement_service.dart';
 
 class AchievementsTab extends StatefulWidget {
   const AchievementsTab({super.key});
@@ -57,7 +58,7 @@ class _AchievementsTabState extends State<AchievementsTab> {
         // Calculate Lifting PRs and Total Volume
         final List<dynamic> exercises = data['exercises'] ?? [];
         for (var ex in exercises) {
-          final String exName = ex['exerciseName'] ?? 'Unknown';
+          final String exName = ex['name'] ?? ex['exerciseName'] ?? 'Unknown';
           final List<dynamic> sets = ex['sets'] ?? [];
           
           for (var s in sets) {
@@ -76,6 +77,16 @@ class _AchievementsTabState extends State<AchievementsTab> {
           }
         }
       }
+
+      // Idempotently synchronize persistent achievement documents in Firestore
+      AchievementService.syncAchievementsFromStats(
+        uid: uid,
+        totalWorkouts: _totalWorkouts,
+        currentStreak: _currentStreak,
+        totalWeightLifted: _totalWeightLifted,
+        maxCaloriesOneSession: _maxCaloriesOneSession,
+        longestWorkoutSecs: _longestWorkoutSecs,
+      ).catchError((e) => debugPrint("Error syncing achievements to Firestore: $e"));
 
       if (mounted) {
         setState(() => _isLoading = false);

@@ -94,10 +94,11 @@ class ExerciseDetailModal extends StatelessWidget {
                 controller: scrollController,
                 padding: const EdgeInsets.all(20),
                 children: [
-                  // 1. Media Visualizer Container (GIF / Video Simulation)
+                  // 1. Media Visualizer Container (Live GIF or Gradient Motion Guide)
                   Container(
                     height: 200,
                     width: double.infinity,
+                    clipBehavior: Clip.antiAlias,
                     decoration: BoxDecoration(
                       gradient: const LinearGradient(
                         colors: [Color(0xFF0F172A), Color(0xFF1E293B)],
@@ -114,36 +115,67 @@ class ExerciseDetailModal extends StatelessWidget {
                       ],
                     ),
                     child: Stack(
+                      fit: StackFit.expand,
                       children: [
-                        Center(
-                          child: Column(
-                            mainAxisAlignment: MainAxisAlignment.center,
-                            children: [
-                              Container(
-                                padding: const EdgeInsets.all(16),
-                                decoration: BoxDecoration(
-                                  color: Colors.teal.withValues(alpha: 0.2),
-                                  shape: BoxShape.circle,
-                                  border: Border.all(color: Colors.tealAccent, width: 1.5),
-                                ),
-                                child: const Icon(
-                                  Icons.play_arrow_rounded,
+                        if (exercise.gifUrl != null && exercise.gifUrl!.isNotEmpty)
+                          Image.network(
+                            exercise.gifUrl!,
+                            fit: BoxFit.contain,
+                            loadingBuilder: (context, child, progress) {
+                              if (progress == null) return child;
+                              return Center(
+                                child: CircularProgressIndicator(
+                                  value: progress.expectedTotalBytes != null
+                                      ? progress.cumulativeBytesLoaded / (progress.expectedTotalBytes ?? 1)
+                                      : null,
                                   color: Colors.tealAccent,
-                                  size: 40,
                                 ),
+                              );
+                            },
+                            errorBuilder: (context, error, stackTrace) => Center(
+                              child: Column(
+                                mainAxisAlignment: MainAxisAlignment.center,
+                                children: [
+                                  Icon(Icons.fitness_center_rounded, color: Colors.teal.shade300, size: 40),
+                                  const SizedBox(height: 8),
+                                  Text(
+                                    exercise.name,
+                                    style: const TextStyle(color: Colors.white70, fontSize: 13),
+                                  ),
+                                ],
                               ),
-                              const SizedBox(height: 12),
-                              Text(
-                                "HD Motion Guide: ${exercise.name}",
-                                style: const TextStyle(
-                                  color: Colors.white70,
-                                  fontSize: 12,
-                                  fontWeight: FontWeight.w600,
+                            ),
+                          )
+                        else
+                          Center(
+                            child: Column(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                Container(
+                                  padding: const EdgeInsets.all(16),
+                                  decoration: BoxDecoration(
+                                    color: Colors.teal.withValues(alpha: 0.2),
+                                    shape: BoxShape.circle,
+                                    border: Border.all(color: Colors.tealAccent, width: 1.5),
+                                  ),
+                                  child: const Icon(
+                                    Icons.fitness_center_rounded,
+                                    color: Colors.tealAccent,
+                                    size: 40,
+                                  ),
                                 ),
-                              ),
-                            ],
+                                const SizedBox(height: 12),
+                                Text(
+                                  "Exercise Guide: ${exercise.name}",
+                                  style: const TextStyle(
+                                    color: Colors.white70,
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                ),
+                              ],
+                            ),
                           ),
-                        ),
                         // Difficulty chip overlay
                         Positioned(
                           top: 12,
@@ -283,16 +315,23 @@ class ExerciseDetailModal extends StatelessWidget {
                     Row(
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
-                        Row(
-                          children: [
-                            const Icon(Icons.swap_calls_rounded, color: Colors.teal, size: 20),
-                            const SizedBox(width: 8),
-                            Text(
-                              "No ${exercise.equipment}? Alternatives",
-                              style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold),
-                            ),
-                          ],
+                        Expanded(
+                          child: Row(
+                            children: [
+                              const Icon(Icons.swap_calls_rounded, color: Colors.teal, size: 20),
+                              const SizedBox(width: 8),
+                              Expanded(
+                                child: Text(
+                                  "No ${exercise.equipment}? Alternatives",
+                                  style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold),
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ),
+                            ],
+                          ),
                         ),
+                        const SizedBox(width: 8),
                         Container(
                           padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                           decoration: BoxDecoration(

@@ -4,5 +4,8 @@
         <item>android.permission.health.READ_STEPS</item>
         <item>android.permission.health.READ_SLEEP</item>
         <item>android.permission.health.READ_ACTIVE_CALORIES_BURNED</item>
+        <item>android.permission.health.READ_EXERCISE</item>
+        <item>android.permission.health.READ_HEART_RATE</item>
+        <item>android.permission.health.READ_DISTANCE</item>
     </array>
 </resources>

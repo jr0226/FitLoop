@@ -5,7 +5,7 @@ from fastapi.responses import JSONResponse
 import logging
 
 from config import HOST, PORT, ENVIRONMENT
-from routers import food, workout, exercises, nutrition
+from routers import food, workout, exercises, nutrition, faq
 
 # Configure logging
 logging.basicConfig(
@@ -43,6 +43,7 @@ app.include_router(food.router)
 app.include_router(workout.router)
 app.include_router(exercises.router)
 app.include_router(nutrition.router)
+app.include_router(faq.router)
 
 
 @app.get("/api/health", tags=["Health"])

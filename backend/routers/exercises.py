@@ -1,6 +1,7 @@
 import re
+import time
 import logging
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Tuple
 import httpx
 from fastapi import APIRouter, HTTPException, Query, Path
 
@@ -12,8 +13,19 @@ router = APIRouter(prefix="/api/exercises", tags=["Exercises"])
 # Allowed ExerciseDB Body Parts for strict input validation
 VALID_BODY_PARTS = {
     "back", "cardio", "chest", "lower arms", "lower legs",
-    "neck", "shoulders", "upper arms", "upper legs", "waist", "all"
+    "neck", "shoulders", "upper arms", "upper legs", "waist", "all",
+    "legs", "arms", "core", "full body"
 }
+
+BODY_PART_ALIASES = {
+    "legs": "upper legs",
+    "arms": "upper arms",
+    "core": "waist",
+    "full body": "all",
+}
+
+_EXERCISE_CACHE: Dict[str, Tuple[float, Any]] = {}
+CACHE_TTL_SECONDS = 3600  # 1 hour caching to minimize RapidAPI quota usage
 
 
 def _check_rapidapi_key():
@@ -34,7 +46,15 @@ def _sanitize_search_term(query: str) -> str:
 
 
 async def _fetch_from_rapidapi(endpoint: str, params: Optional[Dict[str, Any]] = None) -> Any:
-    """Executes a validated, authenticated request to RapidAPI ExerciseDB with timeout and error handling."""
+    """Executes a validated, authenticated request to RapidAPI ExerciseDB with caching, timeout, and error handling."""
+    cache_key = f"{endpoint}_{sorted((params or {}).items())}"
+    now = time.time()
+    if cache_key in _EXERCISE_CACHE:
+        cached_time, cached_data = _EXERCISE_CACHE[cache_key]
+        if now - cached_time < CACHE_TTL_SECONDS:
+            logger.debug(f"Serving cached ExerciseDB response for {endpoint}")
+            return cached_data
+
     _check_rapidapi_key()
 
     url = f"https://{RAPIDAPI_HOST}{endpoint}"
@@ -49,7 +69,9 @@ async def _fetch_from_rapidapi(endpoint: str, params: Optional[Dict[str, Any]] =
 
             if res.status_code == 200:
                 try:
-                    return res.json()
+                    data = res.json()
+                    _EXERCISE_CACHE[cache_key] = (now, data)
+                    return data
                 except Exception as json_err:
                     logger.error(f"Failed to parse RapidAPI JSON response: {json_err}")
                     raise HTTPException(status_code=502, detail="Invalid JSON response from upstream ExerciseDB.")
@@ -107,10 +129,12 @@ async def get_exercises_by_body_part(
             detail=f"Invalid body part. Allowed values: {', '.join(sorted(VALID_BODY_PARTS))}"
         )
 
-    if clean_body_part == "all":
+    target_body_part = BODY_PART_ALIASES.get(clean_body_part, clean_body_part)
+
+    if target_body_part == "all":
         data = await _fetch_from_rapidapi("/exercises", params={"limit": limit})
     else:
-        data = await _fetch_from_rapidapi(f"/exercises/bodyPart/{clean_body_part}", params={"limit": limit})
+        data = await _fetch_from_rapidapi(f"/exercises/bodyPart/{target_body_part}", params={"limit": limit})
 
     return data if isinstance(data, list) else []
 

@@ -133,6 +133,7 @@ class _LoginPageState extends State<LoginPage> {
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
     return Scaffold(
       body: Center(
         child: Padding(
@@ -141,7 +142,7 @@ class _LoginPageState extends State<LoginPage> {
             child: Column(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                const Icon(Icons.fitness_center, size: 80, color: Colors.teal),
+                Icon(Icons.fitness_center, size: 80, color: theme.colorScheme.primary),
                 const SizedBox(height: 20),
                 Text(
                   _isLoginMode ? 'Welcome Back' : 'Create Account',
@@ -172,10 +173,10 @@ class _LoginPageState extends State<LoginPage> {
                         padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
                         visualDensity: VisualDensity.compact,
                       ),
-                      child: const Text(
+                      child: Text(
                         'Forgot Password?',
                         style: TextStyle(
-                          color: Colors.teal,
+                          color: theme.colorScheme.primary,
                           fontWeight: FontWeight.w600,
                           fontSize: 13,
                         ),
@@ -193,7 +194,10 @@ class _LoginPageState extends State<LoginPage> {
                         height: 50,
                         child: ElevatedButton(
                           onPressed: _submitAuth,
-                          style: ElevatedButton.styleFrom(backgroundColor: Colors.teal, foregroundColor: Colors.white),
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: theme.colorScheme.primary,
+                            foregroundColor: theme.brightness == Brightness.dark ? Colors.black : Colors.white,
+                          ),
                           child: Text(_isLoginMode ? 'LOGIN' : 'REGISTER'),
                         ),
                       ),
@@ -201,16 +205,22 @@ class _LoginPageState extends State<LoginPage> {
                       const SizedBox(height: 15),
                       TextButton(
                         onPressed: () => setState(() => _isLoginMode = !_isLoginMode),
-                        child: Text(_isLoginMode ? 'No account? Register here' : 'Have an account? Login here', style: const TextStyle(color: Colors.teal)),
+                        child: Text(
+                          _isLoginMode ? 'No account? Register here' : 'Have an account? Login here',
+                          style: TextStyle(color: theme.colorScheme.primary),
+                        ),
                       ),
                       
                       // 👈 === 以下是新增的 Google 登录 UI === 👉
                       const SizedBox(height: 20),
                       Row(
                         children: [
-                          Expanded(child: Divider(color: Colors.grey.shade300, thickness: 1)),
-                          const Padding(padding: EdgeInsets.symmetric(horizontal: 10), child: Text("OR", style: TextStyle(color: Colors.grey, fontSize: 12))),
-                          Expanded(child: Divider(color: Colors.grey.shade300, thickness: 1)),
+                          Expanded(child: Divider(color: theme.colorScheme.outlineVariant, thickness: 1)),
+                          Padding(
+                            padding: const EdgeInsets.symmetric(horizontal: 10),
+                            child: Text("OR", style: TextStyle(color: theme.colorScheme.onSurfaceVariant, fontSize: 12)),
+                          ),
+                          Expanded(child: Divider(color: theme.colorScheme.outlineVariant, thickness: 1)),
                         ],
                       ),
                       const SizedBox(height: 20),
@@ -220,17 +230,16 @@ class _LoginPageState extends State<LoginPage> {
                         height: 52,
                         child: OutlinedButton.icon(
                           onPressed: _signInWithGoogle, 
-                          // 核心改变：直接用内置图标，不需要网络加载！
                           icon: const Icon(Icons.g_mobiledata_rounded, size: 36, color: Colors.blue), 
-                          label: const Text(
+                          label: Text(
                             "Continue with Google", 
-                            style: TextStyle(color: Colors.black87, fontSize: 16, fontWeight: FontWeight.bold)
+                            style: TextStyle(color: theme.colorScheme.onSurface, fontSize: 16, fontWeight: FontWeight.bold),
                           ),
                           style: OutlinedButton.styleFrom(
-                            backgroundColor: Colors.white,
+                            backgroundColor: theme.cardColor,
                             elevation: 0,
-                            side: BorderSide(color: Colors.grey.shade300, width: 1.5), // 精致的浅灰色边框
-                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)) // 更圆润现代的圆角
+                            side: BorderSide(color: theme.colorScheme.outlineVariant, width: 1.5),
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                           ),
                         ),
                       ),

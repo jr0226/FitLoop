@@ -1,66 +1,48 @@
 import 'package:flutter/material.dart';
-import 'package:firebase_core/firebase_core.dart'; // ✅ 新增：引入 Firebase 核心
-import 'firebase_options.dart'; // ✅ 新增：引入配置文件
+import 'package:firebase_core/firebase_core.dart';
+import 'firebase_options.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'screens/main_dashboard.dart';
 import 'screens/login_page.dart';
 import 'config/app_config.dart';
+import 'services/notification_service.dart';
+import 'services/theme_service.dart';
+import 'theme/app_theme.dart';
 
-// Import scanner
-final ValueNotifier<ThemeMode> themeNotifier = ValueNotifier(ThemeMode.light);
-// ✅ 修改：把 main 变成 async，并初始化 Firebase
+/// Backward-compatible alias referencing the centralized ThemeService notifier.
+final ValueNotifier<ThemeMode> themeNotifier = ThemeService.themeModeNotifier;
+
 void main() async {
-  WidgetsFlutterBinding.ensureInitialized(); // 必须加这行，确保 Flutter 引擎先启动
+  WidgetsFlutterBinding.ensureInitialized();
   
   await Firebase.initializeApp(
-    options: DefaultFirebaseOptions.currentPlatform, // 读取你刚才生成的配置
+    options: DefaultFirebaseOptions.currentPlatform,
   );
+  await NotificationService.instance.init();
+  await ThemeService.init();
   AppConfig.logConfig();
   final user = FirebaseAuth.instance.currentUser;
   runApp(MyApp(isLoggedIn: user != null));
 }
 
-// ==========================================
-// 下面的代码保持不变
-// ==========================================
-class MyApp extends StatelessWidget { 
-  final bool isLoggedIn; // 👈 增加这个变量
-  const MyApp({super.key, required this.isLoggedIn}); // 👈 更新构造函数
+class MyApp extends StatelessWidget {
+  final bool isLoggedIn;
+  const MyApp({super.key, required this.isLoggedIn});
 
   @override
   Widget build(BuildContext context) {
     return ValueListenableBuilder<ThemeMode>(
-      valueListenable: themeNotifier,
+      valueListenable: ThemeService.themeModeNotifier,
       builder: (_, ThemeMode currentMode, _) {
         return MaterialApp(
           title: 'FitLoop',
           debugShowCheckedModeBanner: false,
-          
-          theme: ThemeData(
-            primarySwatch: Colors.teal,
-            useMaterial3: true,
-            brightness: Brightness.light,
-            scaffoldBackgroundColor: Colors.grey[50],
-          ),
-          
-          darkTheme: ThemeData(
-            primarySwatch: Colors.teal,
-            useMaterial3: true,
-            brightness: Brightness.dark,
-            scaffoldBackgroundColor: const Color(0xFF121212),
-            appBarTheme: const AppBarTheme(backgroundColor: Color(0xFF1F1F1F)),
-            cardColor: const Color(0xFF1E1E1E),
-          ),
-
-          themeMode: currentMode, 
-          
-          // 👈 核心修改：如果已登录，直接进入主页；未登录，才进入登录页
+          theme: AppTheme.lightTheme,
+          darkTheme: AppTheme.darkTheme,
+          themeMode: ThemeMode.light,
           home: isLoggedIn ? const MainDashboard() : const LoginPage(),
         );
       },
     );
   }
 }
-
-
-

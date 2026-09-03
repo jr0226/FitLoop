@@ -43,9 +43,13 @@
       double bmi = weight / (heightM * heightM);
       
       String category = "Normal";
-      if (bmi < 18.5) category = "Underweight";
-      else if (bmi >= 25 && bmi < 29.9) category = "Overweight";
-      else if (bmi >= 30) category = "Obese";
+      if (bmi < 18.5) {
+        category = "Underweight";
+      } else if (bmi >= 25 && bmi < 29.9) {
+        category = "Overweight";
+      } else if (bmi >= 30) {
+        category = "Obese";
+      }
 
       // 2. Calculate BMR (Mifflin-St Jeor Equation - most precise)
       double bmr = (10 * weight) + (6.25 * heightCm) - (5 * age);
@@ -68,15 +72,16 @@
 
     @override
     Widget build(BuildContext context) {
+      final theme = Theme.of(context);
       return Container(
         padding: EdgeInsets.only(
           top: 20, left: 20, right: 20,
           // Prevent keyboard from hiding the calculate button
           bottom: MediaQuery.of(context).viewInsets.bottom + 20, 
         ),
-        decoration: const BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+        decoration: BoxDecoration(
+          color: theme.cardColor,
+          borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
         ),
         child: SingleChildScrollView(
           child: Column(
@@ -84,17 +89,37 @@
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Center(
-                child: Container(width: 40, height: 5, decoration: BoxDecoration(color: Colors.grey.shade300, borderRadius: BorderRadius.circular(10))),
+                child: Container(
+                  width: 40,
+                  height: 5,
+                  decoration: BoxDecoration(
+                    color: theme.colorScheme.outlineVariant,
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                ),
               ),
               const SizedBox(height: 20),
-              const Text("Advanced Physical Calculator", style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Colors.teal)),
-              const Text("Get your precise BMI, BMR, and TDEE.", style: TextStyle(color: Colors.grey)),
+              Text(
+                "Advanced Physical Calculator",
+                style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: theme.colorScheme.primary),
+              ),
+              Text(
+                "Get your precise BMI, BMR, and TDEE.",
+                style: TextStyle(color: theme.colorScheme.onSurfaceVariant),
+              ),
               const SizedBox(height: 20),
 
               // --- INPUT FIELDS ---
               Row(
                 children: [
-                  Expanded(child: TextField(controller: _ageCtrl, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: "Age", border: OutlineInputBorder(), prefixIcon: Icon(Icons.cake, size: 18)))),
+                  Expanded(
+                    child: TextField(
+                      controller: _ageCtrl,
+                      keyboardType: TextInputType.number,
+                      style: TextStyle(color: theme.colorScheme.onSurface),
+                      decoration: const InputDecoration(labelText: "Age", border: OutlineInputBorder(), prefixIcon: Icon(Icons.cake, size: 18)),
+                    ),
+                  ),
                   const SizedBox(width: 10),
                   Expanded(
                     child: DropdownButtonFormField(
@@ -109,9 +134,23 @@
               const SizedBox(height: 15),
               Row(
                 children: [
-                  Expanded(child: TextField(controller: _weightCtrl, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: "Weight (kg)", border: OutlineInputBorder(), prefixIcon: Icon(Icons.monitor_weight, size: 18)))),
+                  Expanded(
+                    child: TextField(
+                      controller: _weightCtrl,
+                      keyboardType: TextInputType.number,
+                      style: TextStyle(color: theme.colorScheme.onSurface),
+                      decoration: const InputDecoration(labelText: "Weight (kg)", border: OutlineInputBorder(), prefixIcon: Icon(Icons.monitor_weight, size: 18)),
+                    ),
+                  ),
                   const SizedBox(width: 10),
-                  Expanded(child: TextField(controller: _heightCtrl, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: "Height (cm)", border: OutlineInputBorder(), prefixIcon: Icon(Icons.height, size: 18)))),
+                  Expanded(
+                    child: TextField(
+                      controller: _heightCtrl,
+                      keyboardType: TextInputType.number,
+                      style: TextStyle(color: theme.colorScheme.onSurface),
+                      decoration: const InputDecoration(labelText: "Height (cm)", border: OutlineInputBorder(), prefixIcon: Icon(Icons.height, size: 18)),
+                    ),
+                  ),
                 ],
               ),
               const SizedBox(height: 15),
@@ -129,7 +168,11 @@
                 width: double.infinity, height: 50,
                 child: ElevatedButton(
                   onPressed: _calculate,
-                  style: ElevatedButton.styleFrom(backgroundColor: Colors.teal, foregroundColor: Colors.white, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10))),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: theme.colorScheme.primary,
+                    foregroundColor: theme.brightness == Brightness.dark ? Colors.black : Colors.white,
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                  ),
                   child: const Text("Calculate My Stats", style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
                 ),
               ),
@@ -141,13 +184,18 @@
                 const SizedBox(height: 10),
                 Container(
                   padding: const EdgeInsets.all(15),
-                  decoration: BoxDecoration(color: Colors.teal.shade50, borderRadius: BorderRadius.circular(15)),
+                  decoration: BoxDecoration(
+                    color: theme.brightness == Brightness.dark
+                        ? theme.colorScheme.surfaceContainerHighest
+                        : Colors.teal.shade50,
+                    borderRadius: BorderRadius.circular(15),
+                  ),
                   child: Column(
                     children: [
                       Row(
                         mainAxisAlignment: MainAxisAlignment.spaceBetween,
                         children: [
-                          const Text("BMI", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+                          Text("BMI", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: theme.colorScheme.onSurface)),
                           Text("${_bmi!.toStringAsFixed(1)} ($_bmiCategory)", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: _bmiCategory == "Normal" ? Colors.green : Colors.red)),
                         ],
                       ),
@@ -155,15 +203,15 @@
                       Row(
                         mainAxisAlignment: MainAxisAlignment.spaceBetween,
                         children: [
-                          const Text("BMR (Resting Cal)", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
-                          Text("${_bmr!.toStringAsFixed(0)} kcal", style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: Colors.teal)),
+                          Text("BMR (Resting Cal)", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: theme.colorScheme.onSurface)),
+                          Text("${_bmr!.toStringAsFixed(0)} kcal", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: theme.colorScheme.primary)),
                         ],
                       ),
                       const SizedBox(height: 10),
                       Row(
                         mainAxisAlignment: MainAxisAlignment.spaceBetween,
                         children: [
-                          const Text("TDEE (Daily Needs)", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+                          Text("TDEE (Daily Needs)", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: theme.colorScheme.onSurface)),
                           Text("${_tdee!.toStringAsFixed(0)} kcal", style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18, color: Colors.orange)),
                         ],
                       ),

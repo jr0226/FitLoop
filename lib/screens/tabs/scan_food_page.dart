@@ -1,8 +1,16 @@
+import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:image_picker/image_picker.dart';
 import '../../services/ai_service.dart';
+import '../../services/local_food_image_service.dart';
+import '../../services/scan_food_cache_service.dart';
+import '../../services/scan_draft_service.dart';
+import '../../widgets/diet/meal_detail_sheet.dart';
+import '../../widgets/diet/food_delete_dialog.dart';
+import '../../widgets/diet/scan_result_review_sheet.dart';
+import '../../widgets/diet/food_image_display.dart';
 
 class CameraTab extends StatefulWidget {
   final Function(int) onFoodDetected;
@@ -19,7 +27,7 @@ class _CameraTabState extends State<CameraTab>
   final ImagePicker _picker = ImagePicker();
   DateTime _selectedDate = DateTime.now();
   late AnimationController _pulseController;
-
+  ScanDraft? _activeDraft;
 
   @override
   void initState() {
@@ -28,6 +36,24 @@ class _CameraTabState extends State<CameraTab>
       vsync: this,
       duration: const Duration(seconds: 1),
     )..repeat(reverse: true);
+    _loadActiveDraft();
+  }
+
+  Future<void> _loadActiveDraft() async {
+    final draft = await ScanDraftService.instance.getDraft();
+    if (mounted) {
+      setState(() => _activeDraft = draft);
+    }
+  }
+
+  Future<void> _discardActiveDraft() async {
+    await ScanDraftService.instance.clearDraft();
+    if (mounted) {
+      setState(() => _activeDraft = null);
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text("Draft scan discarded.")),
+      );
+    }
   }
 
   @override
@@ -65,58 +91,248 @@ class _CameraTabState extends State<CameraTab>
     }
   }
 
-  // === FIX 2: INSTANT SAVE UPON SCAN ===
+  String _deriveDefaultMealName(Map<String, dynamic> analysisData) {
+    final rawFoods = analysisData['foods'] as List? ?? [];
+    if (rawFoods.isEmpty) return 'Scanned Meal';
+    if (rawFoods.length == 1) {
+      final f = rawFoods[0];
+      return (f is Map ? f['name'] : f.toString()) ?? 'Meal';
+    }
+    final names = rawFoods.map((f) => (f is Map ? f['name'] : f.toString()) ?? 'Food').toList();
+    if (names.length <= 2) {
+      return names.join(', ');
+    }
+    return "${names[0]}, ${names[1]} + ${names.length - 2} more";
+  }
+
+  Future<void> _saveMealToFirestore({
+    required Map<String, dynamic> finalMealData,
+    required Uint8List imageBytes,
+    required String imageHash,
+  }) async {
+    final user = FirebaseAuth.instance.currentUser!;
+    final docRef = FirebaseFirestore.instance
+        .collection('users')
+        .doc(user.uid)
+        .collection('food_logs')
+        .doc();
+
+    bool hasLocalImage = false;
+    try {
+      // 1. Save compressed image to local on-device storage (food_images/$imageHash.jpg)
+      // Automatically deduplicates: if image was already saved, reuses file with 0 extra disk writes.
+      await LocalFoodImageService.instance.saveImage(
+        imageHash: imageHash,
+        imageBytes: imageBytes,
+      );
+      hasLocalImage = true;
+    } catch (localSaveErr) {
+      debugPrint("[ScanFood] Local image save error: $localSaveErr");
+    }
+
+    // 2. Persist to Firestore: store imageHash and hasLocalImage (no paid Firebase Storage URL required)
+    final Map<String, dynamic> dataToSave = {
+      ...finalMealData,
+      'imageHash': imageHash,
+      'hasLocalImage': hasLocalImage,
+      'timestamp': Timestamp.fromDate(_selectedDate),
+      'createdAt': FieldValue.serverTimestamp(),
+    };
+
+    await docRef.set(dataToSave);
+
+    // 3. Clear corresponding draft after confirmed save
+    await ScanDraftService.instance.clearDraft();
+    await _loadActiveDraft();
+
+    if (mounted) {
+      widget.onFoodDetected((dataToSave['calories'] as num?)?.toInt() ?? 0);
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text("Meal successfully logged to diary!"),
+        ),
+      );
+    }
+  }
+
+  void _resumeActiveDraft() {
+    if (_activeDraft == null) return;
+    final draft = _activeDraft!;
+
+    ScanResultReviewSheet.show(
+      context,
+      imageBytes: draft.imageBytes,
+      initialAnalysis: draft.analysisData,
+      initialMealName: draft.mealName,
+      isCached: true,
+      onEditsChanged: (edits) {
+        ScanDraftService.instance.saveDraft(
+          imageHash: draft.imageHash,
+          imageBytes: draft.imageBytes,
+          analysisData: draft.analysisData,
+          mealName: edits['name']?.toString() ?? draft.mealName,
+          userEdits: edits,
+        );
+      },
+      onReanalyze: () => _reanalyze(draft.imageBytes, draft.imageHash),
+      onSave: (finalMealData) => _saveMealToFirestore(
+        finalMealData: finalMealData,
+        imageBytes: draft.imageBytes,
+        imageHash: draft.imageHash,
+      ),
+    );
+  }
+
+  Future<void> _reanalyze(Uint8List bytes, String imageHash) async {
+    setState(() => _scanning = true);
+    await ScanFoodCacheService.instance.removeCachedAnalysis(imageHash);
+
+    try {
+      final user = FirebaseAuth.instance.currentUser!;
+      final userDoc = await FirebaseFirestore.instance.collection('users').doc(user.uid).get();
+      final userData = userDoc.data() ?? {};
+      final String userGoal = userData['fitnessGoal'] ?? userData['goal'] ?? 'Maintenance';
+      final int? calorieTarget = (userData['calorieTarget'] ?? userData['dailyCaloriesTarget'] as num?)?.toInt();
+      final String dietPreference = userData['dietPreference'] ?? 'Standard';
+      List<String> allergies = [];
+      if (userData['allergies'] is List) {
+        allergies = List<String>.from((userData['allergies'] as List).map((e) => e.toString()));
+      }
+
+      final freshAnalysis = await AiService.analyzeFoodImage(
+        imageBytes: bytes,
+        userGoal: userGoal,
+        calorieTarget: calorieTarget,
+        dietPreference: dietPreference,
+        allergies: allergies,
+      );
+
+      await ScanFoodCacheService.instance.saveAnalysis(imageHash, freshAnalysis);
+      final defaultMealName = _deriveDefaultMealName(freshAnalysis);
+      await ScanDraftService.instance.saveDraft(
+        imageHash: imageHash,
+        imageBytes: bytes,
+        analysisData: freshAnalysis,
+        mealName: defaultMealName,
+      );
+      await _loadActiveDraft();
+
+      if (mounted) {
+        setState(() => _scanning = false);
+        ScanResultReviewSheet.show(
+          context,
+          imageBytes: bytes,
+          initialAnalysis: freshAnalysis,
+          initialMealName: defaultMealName,
+          isCached: false,
+          onEditsChanged: (edits) {
+            ScanDraftService.instance.saveDraft(
+              imageHash: imageHash,
+              imageBytes: bytes,
+              analysisData: freshAnalysis,
+              mealName: edits['name']?.toString() ?? defaultMealName,
+              userEdits: edits,
+            );
+          },
+          onReanalyze: () => _reanalyze(bytes, imageHash),
+          onSave: (finalMealData) => _saveMealToFirestore(
+            finalMealData: finalMealData,
+            imageBytes: bytes,
+            imageHash: imageHash,
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() => _scanning = false);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text("Re-analysis failed: $e")),
+        );
+      }
+    }
+  }
+
   Future<void> _takePhotoAndScan(ImageSource source) async {
     final XFile? photo = await _picker.pickImage(
       source: source,
       maxWidth: 1024,
       maxHeight: 1024,
-      imageQuality: 85,
+      imageQuality: 75,
     );
     if (photo == null) return;
 
     setState(() => _scanning = true);
 
     try {
-      final user = FirebaseAuth.instance.currentUser!;
-      final userDoc = await FirebaseFirestore.instance
-          .collection('users')
-          .doc(user.uid)
-          .get();
-      final String userGoal = userDoc.data()?['goal'] ?? 'Maintenance';
-
       final bytes = await photo.readAsBytes();
-      final Map<String, dynamic> analysisData = await AiService.analyzeFoodImage(
-        imageBytes: bytes,
-        userGoal: userGoal,
-      );
+      final imageHash = ScanFoodCacheService.instance.computeImageHash(bytes);
+      debugPrint("[ScanFood] Selected photo hash: $imageHash (${bytes.length} bytes)");
 
-      // DIRECTLY SAVE TO FIREBASE
-      final List<dynamic> foods = analysisData['foods'] ?? [];
-      await FirebaseFirestore.instance
-          .collection('users')
-          .doc(user.uid)
-          .collection('food_logs')
-          .add({
-        'name': foods.length > 1
-            ? "Mixed Meal (${foods.length} items)"
-            : (foods.isNotEmpty ? foods[0]['name'] : 'Meal'),
-        'calories': analysisData['totalCalories'] ?? 0,
-        'proteins': analysisData['totalProteins'] ?? 0,
-        'carbs': analysisData['totalCarbs'] ?? 0,
-        'fats': analysisData['totalFats'] ?? 0,
-        'score': analysisData['score'] ?? 0,
-        'explanation': analysisData['explanation'] ?? '',
-        'alternatives': analysisData['alternatives'] ?? [],
-        'foods': foods, // Save the itemized array for the bottom sheet!
-        'timestamp': _selectedDate,
-      });
+      // 1. Check Exact-Image Persistent Cache
+      Map<String, dynamic>? analysisData = await ScanFoodCacheService.instance.getCachedAnalysis(imageHash);
+      final bool isCached = analysisData != null;
+
+      if (!isCached) {
+        final user = FirebaseAuth.instance.currentUser!;
+        final userDoc = await FirebaseFirestore.instance
+            .collection('users')
+            .doc(user.uid)
+            .get();
+        final userData = userDoc.data() ?? {};
+        final String userGoal = userData['fitnessGoal'] ?? userData['goal'] ?? 'Maintenance';
+        final int? calorieTarget = (userData['calorieTarget'] ?? userData['dailyCaloriesTarget'] as num?)?.toInt();
+        final String dietPreference = userData['dietPreference'] ?? 'Standard';
+        List<String> allergies = [];
+        if (userData['allergies'] is List) {
+          allergies = List<String>.from((userData['allergies'] as List).map((e) => e.toString()));
+        }
+
+        analysisData = await AiService.analyzeFoodImage(
+          imageBytes: bytes,
+          userGoal: userGoal,
+          calorieTarget: calorieTarget,
+          dietPreference: dietPreference,
+          allergies: allergies,
+        );
+
+        // Store into persistent exact-image cache
+        await ScanFoodCacheService.instance.saveAnalysis(imageHash, analysisData);
+      }
+
+      // 2. Auto-save local draft BEFORE user confirms Save Meal
+      final String defaultMealName = _deriveDefaultMealName(analysisData);
+      await ScanDraftService.instance.saveDraft(
+        imageHash: imageHash,
+        imageBytes: bytes,
+        analysisData: analysisData,
+        mealName: defaultMealName,
+      );
+      await _loadActiveDraft();
 
       if (mounted) {
         setState(() => _scanning = false);
-        widget.onFoodDetected((analysisData['totalCalories'] ?? 0) as int);
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text("Meal instantly logged to diary!")),
+
+        await ScanResultReviewSheet.show(
+          context,
+          imageBytes: bytes,
+          initialAnalysis: analysisData,
+          initialMealName: defaultMealName,
+          isCached: isCached,
+          onEditsChanged: (edits) {
+            ScanDraftService.instance.saveDraft(
+              imageHash: imageHash,
+              imageBytes: bytes,
+              analysisData: analysisData!,
+              mealName: edits['name']?.toString() ?? defaultMealName,
+              userEdits: edits,
+            );
+          },
+          onReanalyze: () => _reanalyze(bytes, imageHash),
+          onSave: (finalMealData) => _saveMealToFirestore(
+            finalMealData: finalMealData,
+            imageBytes: bytes,
+            imageHash: imageHash,
+          ),
         );
       }
     } catch (e) {
@@ -131,180 +347,11 @@ class _CameraTabState extends State<CameraTab>
     }
   }
 
-  // === FIX 3: READ-ONLY BOTTOM SHEET ===
   void _showMealDetails(Map<String, dynamic> data) {
-    final int score = data['score'] ?? 0;
-    final Color scoreColor = score >= 80
-        ? Colors.green
-        : (score >= 50 ? Colors.orange : Colors.redAccent);
-    final List<dynamic> foods = data['foods'] ?? [];
-    final List<dynamic> alternatives = data['alternatives'] ?? [];
-
-    showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.transparent,
-      builder: (context) => Container(
-        height: MediaQuery.of(context).size.height * 0.85,
-        decoration: const BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
-        ),
-        child: Column(
-          children: [
-            const SizedBox(height: 12),
-            Container(
-              width: 48,
-              height: 5,
-              decoration: BoxDecoration(
-                color: Colors.grey.shade300,
-                borderRadius: BorderRadius.circular(10),
-              ),
-            ),
-            Expanded(
-              child: SingleChildScrollView(
-                padding: const EdgeInsets.all(24),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    // === FIX 4: OVERFLOW ERROR ===
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        const Expanded( // Wraps text if it gets too long
-                          child: Text(
-                            "AI Nutrition Analysis",
-                            style: TextStyle(
-                              fontSize: 22,
-                              fontWeight: FontWeight.bold,
-                            ),
-                          ),
-                        ),
-                        const SizedBox(width: 10),
-                        Container(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 14,
-                            vertical: 6,
-                          ),
-                          decoration: BoxDecoration(
-                            color: scoreColor.withOpacity(0.12),
-                            borderRadius: BorderRadius.circular(20),
-                            border: Border.all(
-                              color: scoreColor.withOpacity(0.4),
-                            ),
-                          ),
-                          child: Row(
-                            children: [
-                              Icon(Icons.auto_awesome, color: scoreColor, size: 18),
-                              const SizedBox(width: 6),
-                              Text(
-                                "$score / 100",
-                                style: TextStyle(
-                                  color: scoreColor,
-                                  fontWeight: FontWeight.bold,
-                                  fontSize: 16,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 16),
-                    if (data['explanation'] != null && data['explanation'].toString().isNotEmpty) ...[
-                      Container(
-                        padding: const EdgeInsets.all(16),
-                        decoration: BoxDecoration(
-                          color: Colors.grey.shade50,
-                          borderRadius: BorderRadius.circular(16),
-                          border: Border.all(color: Colors.grey.shade200),
-                        ),
-                        child: Text(
-                          data['explanation'],
-                          style: TextStyle(color: Colors.grey.shade800, height: 1.4),
-                        ),
-                      ),
-                      const SizedBox(height: 24),
-                    ],
-                    
-                    if (foods.isNotEmpty) ...[
-                      const Text(
-                        "Detected Items",
-                        style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700),
-                      ),
-                      const SizedBox(height: 10),
-                      ...foods.map(
-                        (f) => Card(
-                          elevation: 0,
-                          color: Colors.teal.withOpacity(0.04),
-                          margin: const EdgeInsets.only(bottom: 10),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(14),
-                          ),
-                          child: ListTile(
-                            leading: const CircleAvatar(
-                              backgroundColor: Colors.teal,
-                              child: Icon(Icons.restaurant, color: Colors.white, size: 18),
-                            ),
-                            title: Text(
-                              f['name'] ?? 'Unknown',
-                              style: const TextStyle(fontWeight: FontWeight.bold),
-                            ),
-                            subtitle: Text(
-                              "P: ${f['proteins'] ?? 0}g • C: ${f['carbs'] ?? 0}g • F: ${f['fats'] ?? 0}g",
-                            ),
-                            trailing: Text(
-                              "${f['calories'] ?? 0} kcal",
-                              style: const TextStyle(
-                                fontWeight: FontWeight.bold,
-                                fontSize: 15,
-                                color: Colors.teal,
-                              ),
-                            ),
-                          ),
-                        ),
-                      ),
-                      const SizedBox(height: 16),
-                    ],
-
-                    if (alternatives.isNotEmpty) ...[
-                      const Text(
-                        "💡 Healthier Alternatives",
-                        style: TextStyle(
-                          fontSize: 17,
-                          fontWeight: FontWeight.bold,
-                          color: Colors.orange,
-                        ),
-                      ),
-                      const SizedBox(height: 10),
-                      ...alternatives.map(
-                        (alt) => Padding(
-                          padding: const EdgeInsets.only(bottom: 8),
-                          child: Row(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              const Icon(Icons.check_circle, color: Colors.orange, size: 20),
-                              const SizedBox(width: 10),
-                              Expanded(
-                                child: Text(
-                                  alt.toString(),
-                                  style: TextStyle(color: Colors.grey.shade700),
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ),
-                    ],
-                    const SizedBox(height: 30),
-                  ],
-                ),
-              ),
-            ),
-          ],
-        ),
-      ),
+    MealDetailSheet.show(
+      context,
+      meal: data,
+      onDelete: data['id'] != null ? () => _deleteFood(data['id'] as String) : null,
     );
   }
 
@@ -375,7 +422,7 @@ class _CameraTabState extends State<CameraTab>
                 borderRadius: BorderRadius.circular(24),
                 boxShadow: [
                   BoxShadow(
-                    color: Colors.teal.withOpacity(0.3),
+                    color: Colors.teal.withValues(alpha: 0.3),
                     blurRadius: 15,
                     offset: const Offset(0, 8),
                   ),
@@ -469,6 +516,9 @@ class _CameraTabState extends State<CameraTab>
               ),
             ),
 
+            // Resume Previous Scan Draft Card (Auto-saved)
+            if (_activeDraft != null) _buildResumeDraftCard(),
+
             // Food History Section Header
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
@@ -534,8 +584,10 @@ class _CameraTabState extends State<CameraTab>
                   itemCount: snapshot.data!.docs.length,
                   itemBuilder: (context, index) {
                     final doc = snapshot.data!.docs[index];
-                    final meal = doc.data() as Map<String, dynamic>;
-                    final int score = meal['score'] ?? 0;
+                    final meal = Map<String, dynamic>.from(doc.data() as Map<String, dynamic>)..['id'] = doc.id;
+                    final int score = (meal['mealScore'] ?? meal['score'] as num?)?.toInt() ?? 0;
+                    final int calories = (meal['calories'] as num?)?.toInt() ?? 0;
+                    final int protein = (meal['protein'] ?? meal['proteins'] as num?)?.toInt() ?? 0;
                     
                     final Color scoreColor = score >= 80 ? Colors.green : (score >= 50 ? Colors.orange : Colors.redAccent);
 
@@ -550,15 +602,36 @@ class _CameraTabState extends State<CameraTab>
                       child: InkWell(
                         borderRadius: BorderRadius.circular(18),
                         onTap: () => _showMealDetails(meal), // Tap to view details
-                        onLongPress: () => _deleteFood(doc.id), // Long press to delete
+                        onLongPress: () async {
+                          final confirmed = await showFoodDeleteConfirmationDialog(
+                            context,
+                            foodName: meal['name']?.toString() ?? 'Meal',
+                          );
+                          if (confirmed && mounted) {
+                            _deleteFood(doc.id);
+                          }
+                        },
                         child: Padding(
                           padding: const EdgeInsets.all(16.0),
                           child: Row(
                             children: [
-                              CircleAvatar(
-                                radius: 24,
-                                backgroundColor: Colors.teal.shade50,
-                                child: const Icon(Icons.fastfood, color: Colors.teal),
+                              FoodImageDisplay(
+                                imageHash: meal['imageHash']?.toString(),
+                                imageUrl: meal['imageUrl']?.toString(),
+                                width: 48,
+                                height: 48,
+                                borderRadius: BorderRadius.circular(24),
+                                fit: BoxFit.cover,
+                                placeholder: CircleAvatar(
+                                  radius: 24,
+                                  backgroundColor: Colors.teal.shade50,
+                                  child: const Icon(Icons.fastfood, color: Colors.teal),
+                                ),
+                                errorWidget: CircleAvatar(
+                                  radius: 24,
+                                  backgroundColor: Colors.teal.shade50,
+                                  child: const Icon(Icons.fastfood, color: Colors.teal),
+                                ),
                               ),
                               const SizedBox(width: 16),
                               Expanded(
@@ -568,12 +641,12 @@ class _CameraTabState extends State<CameraTab>
                                     Text(
                                       meal['name'] ?? 'Meal',
                                       style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
-                                      maxLines: 1,
+                                      maxLines: 2,
                                       overflow: TextOverflow.ellipsis,
                                     ),
                                     const SizedBox(height: 4),
                                     Text(
-                                      "${meal['calories']} kcal • P: ${meal['proteins']}g",
+                                      "$calories kcal • P: ${protein}g",
                                       style: TextStyle(color: Colors.grey.shade600, fontSize: 13),
                                     ),
                                   ],
@@ -582,7 +655,7 @@ class _CameraTabState extends State<CameraTab>
                               if (score > 0)
                                 Container(
                                   padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                                  decoration: BoxDecoration(color: scoreColor.withOpacity(0.1), borderRadius: BorderRadius.circular(10)),
+                                  decoration: BoxDecoration(color: scoreColor.withValues(alpha: 0.1), borderRadius: BorderRadius.circular(10)),
                                   child: Text("$score", style: TextStyle(color: scoreColor, fontWeight: FontWeight.bold, fontSize: 14)),
                                 ),
                             ],
@@ -597,6 +670,139 @@ class _CameraTabState extends State<CameraTab>
             const SizedBox(height: 30), // Bottom padding
           ],
         ),
+      ),
+    );
+  }
+
+  Widget _buildResumeDraftCard() {
+    final draft = _activeDraft!;
+    return Container(
+      margin: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.amber.shade50,
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: Colors.amber.shade300, width: 1.5),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.amber.withValues(alpha: 0.12),
+            blurRadius: 12,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Flexible(
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                  decoration: BoxDecoration(
+                    color: Colors.amber.shade200,
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(Icons.edit_note, size: 14, color: Colors.amber.shade900),
+                      const SizedBox(width: 4),
+                      Flexible(
+                        child: Text(
+                          "PREVIOUS SCAN",
+                          style: TextStyle(
+                            fontSize: 10,
+                            fontWeight: FontWeight.w800,
+                            color: Colors.amber.shade900,
+                            letterSpacing: 0.5,
+                          ),
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              const SizedBox(width: 8),
+              Text(
+                draft.timeAgo,
+                style: TextStyle(fontSize: 11, color: Colors.amber.shade900, fontWeight: FontWeight.w600),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          Row(
+            children: [
+              ClipRRect(
+                borderRadius: BorderRadius.circular(12),
+                child: Image.memory(
+                  draft.imageBytes,
+                  width: 54,
+                  height: 54,
+                  fit: BoxFit.cover,
+                  errorBuilder: (context, error, stackTrace) => CircleAvatar(
+                    radius: 27,
+                    backgroundColor: Colors.amber.shade100,
+                    child: const Icon(Icons.fastfood, color: Colors.amber),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 14),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      draft.mealName,
+                      style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      "${draft.calories} kcal • P: ${draft.protein}g",
+                      style: TextStyle(color: Colors.grey.shade700, fontSize: 13),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 14),
+          Row(
+            children: [
+              Expanded(
+                flex: 1,
+                child: OutlinedButton(
+                  onPressed: _discardActiveDraft,
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: Colors.red.shade700,
+                    side: BorderSide(color: Colors.red.shade300),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                    padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 8),
+                  ),
+                  child: const FittedBox(fit: BoxFit.scaleDown, child: Text("Discard")),
+                ),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                flex: 1,
+                child: ElevatedButton(
+                  onPressed: _resumeActiveDraft,
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.teal,
+                    foregroundColor: Colors.white,
+                    elevation: 0,
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                    padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 8),
+                  ),
+                  child: const FittedBox(fit: BoxFit.scaleDown, child: Text("Resume")),
+                ),
+              ),
+            ],
+          ),
+        ],
       ),
     );
   }
