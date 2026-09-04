@@ -169,7 +169,9 @@ class DailyRoutineCard extends StatelessWidget {
                               ),
                             ),
                             Text(
-                              "${ex.defaultSets} × ${ex.defaultReps}",
+                              ex.isTimed
+                                  ? "${ex.defaultSets} × ${ex.durationSeconds}s"
+                                  : "${ex.defaultSets} × ${ex.defaultReps}",
                               style: TextStyle(
                                 fontSize: 12,
                                 color: Colors.grey.shade600,

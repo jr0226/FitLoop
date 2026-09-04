@@ -1,11 +1,16 @@
 import 'package:flutter/material.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import '../../models/workout_models.dart';
+import '../../services/favorite_exercises_service.dart';
+import 'add_to_routine_sheet.dart';
 
 class ExerciseDetailModal extends StatelessWidget {
   final ExerciseModel exercise;
   final List<ExerciseModel> allLibraryExercises;
   final ValueChanged<ExerciseModel>? onSelectAlternative;
   final VoidCallback? onAddToWorkout;
+  final bool? isFavorite;
+  final VoidCallback? onToggleFavorite;
 
   const ExerciseDetailModal({
     super.key,
@@ -13,6 +18,8 @@ class ExerciseDetailModal extends StatelessWidget {
     required this.allLibraryExercises,
     this.onSelectAlternative,
     this.onAddToWorkout,
+    this.isFavorite,
+    this.onToggleFavorite,
   });
 
   static Future<void> show(
@@ -21,6 +28,8 @@ class ExerciseDetailModal extends StatelessWidget {
     required List<ExerciseModel> allLibraryExercises,
     ValueChanged<ExerciseModel>? onSelectAlternative,
     VoidCallback? onAddToWorkout,
+    bool? isFavorite,
+    VoidCallback? onToggleFavorite,
   }) {
     return showModalBottomSheet(
       context: context,
@@ -31,6 +40,8 @@ class ExerciseDetailModal extends StatelessWidget {
         allLibraryExercises: allLibraryExercises,
         onSelectAlternative: onSelectAlternative,
         onAddToWorkout: onAddToWorkout,
+        isFavorite: isFavorite,
+        onToggleFavorite: onToggleFavorite,
       ),
     );
   }
@@ -79,6 +90,45 @@ class ExerciseDetailModal extends StatelessWidget {
                       ),
                     ),
                   ),
+                  StreamBuilder<Set<String>>(
+                    stream: FavoriteExercisesService.getFavoriteExerciseIdsStream(),
+                    builder: (context, snapshot) {
+                      final effectiveId = FavoriteExercisesService.getEffectiveExerciseId(exercise);
+                      final isFav = snapshot.data?.contains(effectiveId) ?? (isFavorite ?? false);
+                      return IconButton(
+                        icon: Icon(
+                          isFav ? Icons.favorite : Icons.favorite_border,
+                          color: isFav ? Colors.redAccent : Colors.grey.shade600,
+                        ),
+                        tooltip: isFav ? 'Remove from favorites' : 'Add to favorites',
+                        onPressed: () async {
+                          if (onToggleFavorite != null) {
+                            onToggleFavorite!();
+                          } else {
+                            try {
+                              await FavoriteExercisesService.toggleFavorite(exercise);
+                            } catch (e) {
+                              if (context.mounted) {
+                                final isPermissionDenied = e is FirebaseException && e.code == 'permission-denied';
+                                ScaffoldMessenger.of(context).hideCurrentSnackBar();
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  SnackBar(
+                                    content: Text(
+                                      isPermissionDenied
+                                          ? "Unable to save favorite (Firestore permission denied - security rules update required)."
+                                          : "Unable to save favorite. Please try again.",
+                                    ),
+                                    backgroundColor: Colors.red.shade700,
+                                    behavior: SnackBarBehavior.floating,
+                                  ),
+                                );
+                              }
+                            }
+                          }
+                        },
+                      );
+                    },
+                  ),
                   IconButton(
                     icon: const Icon(Icons.close),
                     onPressed: () => Navigator.pop(context),
@@ -94,6 +144,34 @@ class ExerciseDetailModal extends StatelessWidget {
                 controller: scrollController,
                 padding: const EdgeInsets.all(20),
                 children: [
+                  // Tracking Mode Indicator
+                  Container(
+                    margin: const EdgeInsets.only(bottom: 14),
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                    decoration: BoxDecoration(
+                      color: exercise.trackingType.color.withValues(alpha: 0.1),
+                      borderRadius: BorderRadius.circular(10),
+                      border: Border.all(
+                        color: exercise.trackingType.color.withValues(alpha: 0.3),
+                      ),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(exercise.trackingType.icon, size: 16, color: exercise.trackingType.color),
+                        const SizedBox(width: 8),
+                        Text(
+                          "Tracking Type: ${exercise.trackingType.displayName}",
+                          style: TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w700,
+                            color: exercise.trackingType.color,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+
                   // 1. Media Visualizer Container (Live GIF or Gradient Motion Guide)
                   Container(
                     height: 200,
@@ -470,7 +548,7 @@ class ExerciseDetailModal extends StatelessWidget {
 
                   const SizedBox(height: 30),
 
-                  // Add To Active Workout CTA
+                  // Add To Active Workout or Save to Routine CTA
                   if (onAddToWorkout != null)
                     SizedBox(
                       height: 50,
@@ -482,6 +560,26 @@ class ExerciseDetailModal extends StatelessWidget {
                         icon: const Icon(Icons.add_rounded),
                         label: const Text(
                           "Add To Workout Routine",
+                          style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15),
+                        ),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: Colors.teal,
+                          foregroundColor: Colors.white,
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                        ),
+                      ),
+                    )
+                  else
+                    SizedBox(
+                      height: 50,
+                      child: ElevatedButton.icon(
+                        onPressed: () {
+                          Navigator.pop(context);
+                          AddToRoutineSheet.show(context, exercise);
+                        },
+                        icon: const Icon(Icons.playlist_add_rounded),
+                        label: const Text(
+                          "Add To Routine",
                           style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15),
                         ),
                         style: ElevatedButton.styleFrom(

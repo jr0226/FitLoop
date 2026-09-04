@@ -5,12 +5,18 @@ class ExerciseListCard extends StatelessWidget {
   final ExerciseModel exercise;
   final VoidCallback onTap;
   final VoidCallback? onAdd;
+  final VoidCallback? onAddToRoutine;
+  final bool isFavorite;
+  final VoidCallback? onToggleFavorite;
 
   const ExerciseListCard({
     super.key,
     required this.exercise,
     required this.onTap,
     this.onAdd,
+    this.onAddToRoutine,
+    this.isFavorite = false,
+    this.onToggleFavorite,
   });
 
   IconData _getMuscleIcon(String muscle) {
@@ -121,11 +127,28 @@ class ExerciseListCard extends StatelessWidget {
                       ),
                       const SizedBox(height: 6),
 
-                      // Badges: Equipment + Difficulty Tier
+                      // Badges: Equipment + Difficulty Tier + Tracking Type
                       Wrap(
                         spacing: 6,
                         runSpacing: 4,
                         children: [
+                          // Tracking Type Badge
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+                            decoration: BoxDecoration(
+                              color: Colors.teal.shade50,
+                              borderRadius: BorderRadius.circular(6),
+                            ),
+                            child: Text(
+                              exercise.trackingType.displayName,
+                              style: TextStyle(
+                                fontSize: 10,
+                                fontWeight: FontWeight.bold,
+                                color: Colors.teal.shade800,
+                              ),
+                            ),
+                          ),
+
                           // Equipment Badge
                           Container(
                             padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
@@ -172,19 +195,71 @@ class ExerciseListCard extends StatelessWidget {
                           ),
                         ],
                       ),
+                      if (onAddToRoutine != null) ...[
+                        const SizedBox(height: 6),
+                        GestureDetector(
+                          onTap: onAddToRoutine,
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                            decoration: BoxDecoration(
+                              color: Colors.teal.shade50,
+                              borderRadius: BorderRadius.circular(6),
+                              border: Border.all(color: Colors.teal.shade200),
+                            ),
+                            child: const Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(Icons.playlist_add, size: 13, color: Colors.teal),
+                                SizedBox(width: 4),
+                                Text(
+                                  "Add to Routine",
+                                  style: TextStyle(
+                                    fontSize: 10,
+                                    fontWeight: FontWeight.bold,
+                                    color: Colors.teal,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ],
                     ],
                   ),
                 ),
 
-                // Action Arrow / Add Button
-                if (onAdd != null)
-                  IconButton(
-                    icon: const Icon(Icons.add_circle, color: Colors.teal, size: 28),
-                    onPressed: onAdd,
-                    tooltip: 'Add to workout',
-                  )
-                else
-                  Icon(Icons.chevron_right, color: Colors.grey.shade400, size: 20),
+                const SizedBox(width: 6),
+
+                // Trailing: Favorite Button + Add Button / Chevron
+                Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    if (onToggleFavorite != null)
+                      IconButton(
+                        icon: Icon(
+                          isFavorite ? Icons.favorite : Icons.favorite_border,
+                          color: isFavorite ? Colors.redAccent : Colors.grey.shade400,
+                          size: 22,
+                        ),
+                        onPressed: onToggleFavorite,
+                        tooltip: isFavorite ? 'Remove from favorites' : 'Add to favorites',
+                        visualDensity: VisualDensity.compact,
+                        padding: EdgeInsets.zero,
+                        constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
+                      ),
+                    if (onAdd != null)
+                      IconButton(
+                        icon: const Icon(Icons.add_circle, color: Colors.teal, size: 28),
+                        onPressed: onAdd,
+                        tooltip: 'Add to workout',
+                        visualDensity: VisualDensity.compact,
+                        padding: EdgeInsets.zero,
+                        constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
+                      )
+                    else
+                      Icon(Icons.chevron_right, color: Colors.grey.shade400, size: 20),
+                  ],
+                ),
               ],
             ),
           ),

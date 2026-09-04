@@ -202,15 +202,15 @@ void main() {
 
       // Verify clean header
       expect(find.text('Upper Body Blast'), findsOneWidget);
-      expect(find.text('Exercise 1 of 2'), findsOneWidget);
+      expect(find.text('Ex 1 of 2'), findsOneWidget);
 
       // Verify Bodyweight exercise does not force 60kg
-      expect(find.text('BW'), findsWidgets);
+      expect(find.text('Bodyweight'), findsWidgets);
 
       // Verify table headers
       expect(find.text('SET'), findsOneWidget);
-      expect(find.text('ADD WT'), findsOneWidget);
-      expect(find.text('REPS'), findsOneWidget);
+      expect(find.text('TARGET'), findsOneWidget);
+      expect(find.text('ACTUAL REPS'), findsOneWidget);
 
       // Verify Next Exercise action
       expect(find.text('Next Exercise'), findsOneWidget);
@@ -219,7 +219,7 @@ void main() {
       await tester.tap(find.text('Next Exercise'));
       await tester.pumpAndSettle();
 
-      expect(find.text('Exercise 2 of 2'), findsOneWidget);
+      expect(find.text('Ex 2 of 2'), findsOneWidget);
       expect(find.text('Barbell Squat'), findsOneWidget);
       // On last exercise, action becomes Finish Workout
       expect(find.text('Finish Workout'), findsOneWidget);
@@ -246,8 +246,8 @@ void main() {
       expect(find.text('Discard Session?'), findsOneWidget);
       expect(find.text('Discard'), findsOneWidget);
 
-      // Tap continue session
-      await tester.tap(find.text('Continue Session'));
+      // Tap continue workout
+      await tester.tap(find.text('Continue Workout'));
       await tester.pumpAndSettle();
       expect(find.text('Discard Session?'), findsNothing);
     });

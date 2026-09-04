@@ -1,6 +1,8 @@
 import re
 import time
 import logging
+import asyncio
+import urllib.parse
 from typing import List, Dict, Any, Optional, Tuple
 import httpx
 from fastapi import APIRouter, HTTPException, Query, Path
@@ -10,19 +12,30 @@ from config import RAPIDAPI_KEY, RAPIDAPI_HOST
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/exercises", tags=["Exercises"])
 
-# Allowed ExerciseDB Body Parts for strict input validation
-VALID_BODY_PARTS = {
+# Canonical ExerciseDB body parts according to official documentation
+CANONICAL_BODY_PARTS = {
     "back", "cardio", "chest", "lower arms", "lower legs",
-    "neck", "shoulders", "upper arms", "upper legs", "waist", "all",
-    "legs", "arms", "core", "full body"
+    "neck", "shoulders", "upper arms", "upper legs", "waist", "all"
 }
 
-BODY_PART_ALIASES = {
-    "legs": "upper legs",
-    "arms": "upper arms",
+# Supported composite categories combining multiple ExerciseDB sub-parts
+COMPOSITE_BODY_PARTS: Dict[str, List[str]] = {
+    "arms": ["upper arms", "lower arms"],
+    "legs": ["upper legs", "lower legs"],
+}
+
+# User-facing category aliases mapped to canonical ExerciseDB body parts
+BODY_PART_ALIASES: Dict[str, str] = {
     "core": "waist",
     "full body": "all",
 }
+
+# Allowed body parts for route input validation
+VALID_BODY_PARTS = (
+    CANONICAL_BODY_PARTS
+    | set(COMPOSITE_BODY_PARTS.keys())
+    | set(BODY_PART_ALIASES.keys())
+)
 
 _EXERCISE_CACHE: Dict[str, Tuple[float, Any]] = {}
 CACHE_TTL_SECONDS = 3600  # 1 hour caching to minimize RapidAPI quota usage
@@ -107,8 +120,9 @@ async def search_exercises(
     Search exercises by name from ExerciseDB with input sanitization and rate limits.
     """
     sanitized_query = _sanitize_search_term(query)
+    quoted_query = urllib.parse.quote(sanitized_query)
     data = await _fetch_from_rapidapi(
-        f"/exercises/name/{sanitized_query}",
+        f"/exercises/name/{quoted_query}",
         params={"limit": limit}
     )
     return data if isinstance(data, list) else []
@@ -121,6 +135,7 @@ async def get_exercises_by_body_part(
 ):
     """
     Fetch exercises for a specific body part (e.g. chest, back, upper arms, cardio).
+    Supports composite categories (arms, legs) and user-friendly aliases (core -> waist).
     """
     clean_body_part = bodyPart.strip().lower()
     if clean_body_part not in VALID_BODY_PARTS:
@@ -129,12 +144,60 @@ async def get_exercises_by_body_part(
             detail=f"Invalid body part. Allowed values: {', '.join(sorted(VALID_BODY_PARTS))}"
         )
 
+    # 1. Handle Composite Categories (Arms: upper + lower arms; Legs: upper + lower legs)
+    if clean_body_part in COMPOSITE_BODY_PARTS:
+        composite_cache_key = f"composite_{clean_body_part}_{limit}"
+        now = time.time()
+        if composite_cache_key in _EXERCISE_CACHE:
+            cached_time, cached_data = _EXERCISE_CACHE[composite_cache_key]
+            if now - cached_time < CACHE_TTL_SECONDS:
+                logger.debug(f"Serving cached composite response for {clean_body_part}")
+                return cached_data
+
+        sub_parts = COMPOSITE_BODY_PARTS[clean_body_part]
+        # Request proportional share from each sub-part with safety buffer
+        sub_limit = max(10, (limit + len(sub_parts) - 1) // len(sub_parts))
+
+        tasks = [
+            _fetch_from_rapidapi(
+                f"/exercises/bodyPart/{urllib.parse.quote(part)}",
+                params={"limit": sub_limit}
+            )
+            for part in sub_parts
+        ]
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+
+        merged: List[Dict[str, Any]] = []
+        seen_ids = set()
+
+        part_lists = [r if isinstance(r, list) else [] for r in results]
+        max_len = max((len(lst) for lst in part_lists), default=0)
+
+        # Interleave exercises from each sub-part for balanced representation
+        for i in range(max_len):
+            for lst in part_lists:
+                if i < len(lst):
+                    ex = lst[i]
+                    ex_id = ex.get("id") if isinstance(ex, dict) else None
+                    if ex_id and ex_id not in seen_ids:
+                        seen_ids.add(ex_id)
+                        merged.append(ex)
+                        if len(merged) >= limit:
+                            break
+            if len(merged) >= limit:
+                break
+
+        _EXERCISE_CACHE[composite_cache_key] = (now, merged)
+        return merged
+
+    # 2. Handle Canonical or Aliased Body Parts (e.g. core -> waist, full body -> all)
     target_body_part = BODY_PART_ALIASES.get(clean_body_part, clean_body_part)
 
     if target_body_part == "all":
         data = await _fetch_from_rapidapi("/exercises", params={"limit": limit})
     else:
-        data = await _fetch_from_rapidapi(f"/exercises/bodyPart/{target_body_part}", params={"limit": limit})
+        quoted_part = urllib.parse.quote(target_body_part)
+        data = await _fetch_from_rapidapi(f"/exercises/bodyPart/{quoted_part}", params={"limit": limit})
 
     return data if isinstance(data, list) else []
 

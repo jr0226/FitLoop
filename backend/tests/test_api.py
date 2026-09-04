@@ -86,9 +86,11 @@ class TestBackendAPI(unittest.IsolatedAsyncioTestCase):
         response = await self.client.get("/api/exercises/body-part/invalid_part")
         self.assertEqual(response.status_code, 400)
 
-        # Valid body part route exists
-        response = await self.client.get("/api/exercises/body-part/chest")
-        self.assertIn(response.status_code, [200, 502, 503])
+        # Valid body part routes exist and route properly
+        for part in ["chest", "core", "arms", "legs"]:
+            response = await self.client.get(f"/api/exercises/body-part/{part}")
+            # Accepts valid route format, returns 200 (if key/cached) or 503 (if unconfigured)
+            self.assertIn(response.status_code, [200, 502, 503])
 
     async def test_exercise_id_validation(self):
         # Invalid ID format

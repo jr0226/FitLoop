@@ -114,6 +114,14 @@ service cloud.firestore {
       }
 
       // ----------------------------------------
+      // Subcollection: favorite_exercises
+      // User's favorited/bookmarked exercise library snapshots.
+      // ----------------------------------------
+      match /favorite_exercises/{exerciseId} {
+        allow read, write: if isOwner(userId);
+      }
+
+      // ----------------------------------------
       // Subcollection: daily_logs  [DEPRECATED]
       // No longer written or read by Flutter (deprecated 2026-09).
       // Historical documents remain in Firestore untouched.

@@ -123,7 +123,7 @@
                   const SizedBox(width: 10),
                   Expanded(
                     child: DropdownButtonFormField(
-                      value: _gender,
+                      initialValue: _gender,
                       items: ["Male", "Female"].map((e) => DropdownMenuItem(value: e, child: Text(e))).toList(),
                       onChanged: (v) => setState(() => _gender = v.toString()),
                       decoration: const InputDecoration(labelText: "Gender", border: OutlineInputBorder()),
@@ -155,7 +155,7 @@
               ),
               const SizedBox(height: 15),
               DropdownButtonFormField(
-                value: _activity,
+                initialValue: _activity,
                 isExpanded: true,
                 items: ["Sedentary", "Light", "Moderate", "Active", "Very Active"].map((e) => DropdownMenuItem(value: e, child: Text(e))).toList(),
                 onChanged: (v) => setState(() => _activity = v.toString()),

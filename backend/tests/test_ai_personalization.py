@@ -266,6 +266,90 @@ class TestAIPersonalization(unittest.IsolatedAsyncioTestCase):
             recent_workouts_summary=None,
         )
 
+    @patch("routers.workout.generate_workout_recommendations")
+    async def test_workout_recommend_endpoint_with_target_category(self, mock_generate):
+        mock_generate.return_value = [
+            {
+                "routineName": "Core Stability Essentials",
+                "level": "Beginner",
+                "category": "Core",
+                "image": "https://example.com/img.jpg",
+                "exercises": [{"name": "Plank", "category": "Core", "sets": "3 sets x 30s"}],
+            }
+        ]
+
+        payload = {
+            "userGoal": "Muscle Gain",
+            "difficulty": "Beginner",
+            "category": "Core",
+        }
+        response = await self.client.post("/api/ai/generate-workout", json=payload)
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertEqual(data[0]["category"], "Core")
+
+        mock_generate.assert_called_once_with(
+            user_goal="Muscle Gain",
+            difficulty="Beginner",
+            equipment=[],
+            preferred_workout_types=[],
+            recent_workouts_summary=None,
+            target_category="Core",
+        )
+
+    def test_workout_prompt_explicit_target_category_mandate(self):
+        for cat in ["Cardio", "Core", "Full Body"]:
+            prompt = build_workout_recommendation_prompt(
+                user_goal="Muscle Gain",
+                difficulty="Beginner",
+                target_category=cat,
+            )
+            self.assertIn(f"EXPLICIT TARGET CATEGORY: {cat}", prompt)
+            self.assertIn(f"EXPLICIT CATEGORY MANDATE: The user explicitly requested a '{cat}' workout", prompt)
+            self.assertIn(f'BOTH generated routines MUST belong to the \'{cat}\' category and have "category": "{cat}"', prompt)
+
+    def test_profile_a_bodyweight_equipment_repair(self):
+        from services.gemini_service import _is_equipment_compatible, _repair_exercise_equipment
+
+        # Barbell Bench Press is incompatible with bodyweight-only
+        self.assertFalse(_is_equipment_compatible("Barbell", "Barbell Bench Press", []))
+        repaired = _repair_exercise_equipment({"name": "Barbell Bench Press", "equipment": "Barbell", "category": "Chest"}, [])
+        self.assertEqual(repaired["name"], "Standard Push-Ups")
+        self.assertEqual(repaired["equipment"], "Bodyweight")
+
+        # Cable Crossover is incompatible with bodyweight-only
+        self.assertFalse(_is_equipment_compatible("Cable", "Cable Crossover", ["Bodyweight"]))
+        repaired_cable = _repair_exercise_equipment({"name": "Cable Crossover", "equipment": "Cable", "category": "Chest"}, ["Bodyweight"])
+        self.assertEqual(repaired_cable["equipment"], "Bodyweight")
+
+    def test_profile_b_dumbbells_equipment_repair(self):
+        from services.gemini_service import _is_equipment_compatible, _repair_exercise_equipment
+
+        allowed = ["Dumbbells", "Bench"]
+        # Dumbbell Bench Press is compatible
+        self.assertTrue(_is_equipment_compatible("Dumbbells", "Dumbbell Bench Press", allowed))
+
+        # Barbell Squat is incompatible, repairs to Dumbbell Goblet Squat
+        self.assertFalse(_is_equipment_compatible("Barbell", "Barbell Back Squat", allowed))
+        repaired_squat = _repair_exercise_equipment({"name": "Barbell Back Squat", "equipment": "Barbell", "category": "Legs"}, allowed)
+        self.assertEqual(repaired_squat["name"], "Dumbbell Goblet Squat")
+        self.assertEqual(repaired_squat["equipment"], "Dumbbells")
+
+        # Cable Lat Pulldown is incompatible, repairs to Dumbbell Bent-Over Row
+        self.assertFalse(_is_equipment_compatible("Cable", "Cable Lat Pulldown", allowed))
+        repaired_pull = _repair_exercise_equipment({"name": "Cable Lat Pulldown", "equipment": "Cable", "category": "Back"}, allowed)
+        self.assertEqual(repaired_pull["name"], "Dumbbell Bent-Over Row")
+        self.assertEqual(repaired_pull["equipment"], "Dumbbells")
+
+    def test_profile_c_full_gym_compatibility(self):
+        from services.gemini_service import _is_equipment_compatible
+
+        allowed = ["Full Gym"]
+        self.assertTrue(_is_equipment_compatible("Barbell", "Barbell Bench Press", allowed))
+        self.assertTrue(_is_equipment_compatible("Cable", "Cable Tricep Pushdown", allowed))
+        self.assertTrue(_is_equipment_compatible("Machine", "Leg Press Machine", allowed))
+
 
 if __name__ == "__main__":
     unittest.main()
+

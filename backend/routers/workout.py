@@ -12,6 +12,8 @@ class WorkoutRecommendRequest(BaseModel):
     difficulty: Optional[str] = Field("Intermediate", description="Experience level (e.g. Beginner, Intermediate, Advanced)")
     fitnessGoal: Optional[str] = Field(None, description="Alias for userGoal")
     fitnessLevel: Optional[str] = Field(None, description="Alias for difficulty")
+    category: Optional[str] = Field(None, description="Explicit target workout category (e.g. Cardio, Core, Full Body, Strength, HIIT)")
+    targetCategory: Optional[str] = Field(None, description="Alias for category")
     equipment: Optional[List[str]] = Field(default_factory=list, description="Available workout equipment (e.g. ['Dumbbells', 'Bench'])")
     preferredWorkoutTypes: Optional[List[str]] = Field(default_factory=list, description="User's preferred workout categories (e.g. ['Strength', 'Full Body'])")
     recentWorkoutsSummary: Optional[str] = Field(None, description="Compact summary of recent workout history (e.g. 'Recent 7 days: Chest: 2, Back: 1')")
@@ -22,16 +24,22 @@ class WorkoutRecommendRequest(BaseModel):
 async def recommend_workouts(request: WorkoutRecommendRequest):
     """
     Generates AI-recommended workout routines tailored to the user's fitness goal,
-    experience level, available equipment, preferred workout types, and recent history.
+    experience level, available equipment, preferred workout types, recent history,
+    and explicit target category.
     """
     goal = request.fitnessGoal or request.userGoal or "Maintenance"
     diff = request.fitnessLevel or request.difficulty or "Intermediate"
+    target_cat = request.targetCategory or request.category
     
-    routines = await generate_workout_recommendations(
-        user_goal=goal,
-        difficulty=diff,
-        equipment=request.equipment or [],
-        preferred_workout_types=request.preferredWorkoutTypes or [],
-        recent_workouts_summary=request.recentWorkoutsSummary,
-    )
+    kwargs = {
+        "user_goal": goal,
+        "difficulty": diff,
+        "equipment": request.equipment or [],
+        "preferred_workout_types": request.preferredWorkoutTypes or [],
+        "recent_workouts_summary": request.recentWorkoutsSummary,
+    }
+    if target_cat:
+        kwargs["target_category"] = target_cat
+    
+    routines = await generate_workout_recommendations(**kwargs)
     return routines

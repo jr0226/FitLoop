@@ -42,9 +42,11 @@ class _LoginPageState extends State<LoginPage> {
           email: _emailController.text.trim(),
           password: _passwordController.text.trim(),
         );
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Registration Successful! Logging in...')),
-        );
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Registration Successful! Logging in...')),
+          );
+        }
       }
 
       // === NEW LOGIC: Check where to send the user ===
@@ -73,7 +75,9 @@ class _LoginPageState extends State<LoginPage> {
       if (e.code == 'wrong-password') message = "Wrong password.";
       if (e.code == 'email-already-in-use') message = "Email already registered.";
       if (e.code == 'weak-password') message = "Password too weak.";
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
+      }
     } finally {
       if (mounted) setState(() => _isLoading = false);
     }
@@ -88,7 +92,7 @@ class _LoginPageState extends State<LoginPage> {
       
       final GoogleSignInAccount? googleUser = await GoogleSignIn().signIn();
       if (googleUser == null) {
-        setState(() => _isLoading = false);
+        if (mounted) setState(() => _isLoading = false);
         return; // 用户在弹窗时点了取消
       }
 
@@ -105,6 +109,7 @@ class _LoginPageState extends State<LoginPage> {
       // 4. 完美复用你的路由逻辑：检查是否有数据
       if (mounted) {
         bool hasData = await checkUserHasData();
+        if (!mounted) return;
         if (hasData) {
           Navigator.pushReplacement(context, MaterialPageRoute(builder: (context) => const MainDashboard()));
         } else {
@@ -112,8 +117,10 @@ class _LoginPageState extends State<LoginPage> {
         }
       }
     } catch (e) {
-      print("Google Sign-In Error: $e");
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Google Login Failed: $e")));
+      debugPrint("Google Sign-In Error: $e");
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Google Login Failed: $e")));
+      }
     } finally {
       if (mounted) setState(() => _isLoading = false);
     }

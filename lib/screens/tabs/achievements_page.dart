@@ -296,7 +296,7 @@ class _AchievementsTabState extends State<AchievementsTab> {
             child: ListTile(
               leading: Container(
                 padding: const EdgeInsets.all(8),
-                decoration: BoxDecoration(color: Colors.teal.withOpacity(0.1), borderRadius: BorderRadius.circular(10)),
+                decoration: BoxDecoration(color: Colors.teal.withValues(alpha: 0.1), borderRadius: BorderRadius.circular(10)),
                 child: const Icon(Icons.fitness_center, color: Colors.teal),
               ),
               title: Text(entry.key, style: const TextStyle(fontWeight: FontWeight.bold)),

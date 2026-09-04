@@ -114,6 +114,7 @@ class AiService {
     String difficulty = 'Intermediate',
     List<String> equipment = const [],
     List<String> preferredWorkoutTypes = const [],
+    String? targetCategory,
     String? recentWorkoutsSummary,
     http.Client? httpClient,
   }) async {
@@ -135,6 +136,10 @@ class AiService {
         'equipment': equipment,
         'preferredWorkoutTypes': preferredWorkoutTypes,
       };
+      if (targetCategory != null && targetCategory.trim().isNotEmpty) {
+        bodyPayload['targetCategory'] = targetCategory.trim();
+        bodyPayload['category'] = targetCategory.trim();
+      }
       if (recentWorkoutsSummary != null && recentWorkoutsSummary.trim().isNotEmpty) {
         bodyPayload['recentWorkoutsSummary'] = recentWorkoutsSummary.trim();
       }

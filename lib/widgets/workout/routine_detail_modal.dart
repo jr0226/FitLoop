@@ -352,7 +352,9 @@ class RoutineDetailModal extends StatelessWidget {
                                   borderRadius: BorderRadius.circular(8),
                                 ),
                                 child: Text(
-                                  "${ex.defaultSets} × ${ex.defaultReps}",
+                                  ex.isTimed
+                                      ? "${ex.defaultSets} × ${ex.durationSeconds}s"
+                                      : "${ex.defaultSets} × ${ex.defaultReps}",
                                   style: TextStyle(
                                     fontWeight: FontWeight.bold,
                                     fontSize: 12,

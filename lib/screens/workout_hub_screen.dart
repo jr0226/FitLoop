@@ -9,6 +9,9 @@ import '../widgets/workout/routine_detail_modal.dart';
 import 'active_workout_page.dart';
 import 'exercise_library_screen.dart';
 import 'workout_analytics_screen.dart';
+import 'build_routine_screen.dart';
+import '../widgets/workout/workout_setup_sheet.dart';
+import '../utils/routine_category_classifier.dart';
 
 class WorkoutHubScreen extends StatefulWidget {
   const WorkoutHubScreen({super.key});
@@ -21,6 +24,7 @@ class _WorkoutHubScreenState extends State<WorkoutHubScreen> {
   String _selectedCategory = "All";
   final List<String> _categories = ["All", "Full Body", "Upper Body", "Lower Body", "Core", "Cardio"];
   bool _isGeneratingAi = false;
+  bool _showAllRoutines = false;
 
   void _openRoutineDetails(WorkoutRoutine routine) {
     RoutineDetailModal.show(
@@ -32,28 +36,17 @@ class _WorkoutHubScreenState extends State<WorkoutHubScreen> {
   }
 
   void _startRoutine(WorkoutRoutine routine) {
-    final convertedExercises = routine.exercises.map((e) => {
-      'name': e.name,
-      'target': e.targetMuscle,
-      'equipment': e.equipment,
-      'sets': e.defaultSets,
-      'reps': e.defaultReps,
-    }).toList();
+    WorkoutSetupSheet.show(
+      context,
+      routine: routine,
+    );
+  }
 
+  void _openBuildMyOwnRoutine([WorkoutRoutine? copyFrom]) {
     Navigator.push(
       context,
       MaterialPageRoute(
-        builder: (context) => ActiveWorkoutPage(
-          workoutName: routine.title,
-          routine: convertedExercises.isEmpty ? [
-            {'name': 'Bodyweight Squats', 'target': 'Legs', 'sets': 3, 'reps': 15, 'equipment': 'Bodyweight'},
-            {'name': 'Push Ups', 'target': 'Chest', 'sets': 3, 'reps': 12, 'equipment': 'Bodyweight'},
-          ] : convertedExercises,
-          routineId: routine.id,
-          workoutType: routine.category,
-          fitnessGoal: routine.goal.displayName,
-          fitnessLevel: routine.level.displayName,
-        ),
+        builder: (context) => BuildRoutineScreen(initialRoutine: copyFrom),
       ),
     );
   }
@@ -118,7 +111,7 @@ class _WorkoutHubScreenState extends State<WorkoutHubScreen> {
     }
   }
 
-  Future<void> _generateAiPlan(String userGoal, String difficulty) async {
+  Future<void> _generateAiPlan(String userGoal, String difficulty, {String? targetCategory}) async {
     if (_isGeneratingAi) return;
     setState(() => _isGeneratingAi = true);
 
@@ -188,28 +181,65 @@ class _WorkoutHubScreenState extends State<WorkoutHubScreen> {
         difficulty: effectiveDifficulty,
         equipment: equipment,
         preferredWorkoutTypes: preferredWorkoutTypes,
+        targetCategory: targetCategory,
         recentWorkoutsSummary: recentSummary,
       );
 
+      // Fetch existing routines to check signatures and prevent duplicate AI saves
+      final existingRoutinesSnap = await FirebaseFirestore.instance
+          .collection('users')
+          .doc(user.uid)
+          .collection('routines')
+          .get();
+
+      final existingRoutinesList = existingRoutinesSnap.docs
+          .map((d) => WorkoutRoutine.fromFirestore(d.id, d.data()))
+          .toList();
+
+      final existingSignatures = existingRoutinesList.map((r) => r.signature).toSet();
+
       final batch = FirebaseFirestore.instance.batch();
+      int validRoutinesCount = 0;
+      int skippedDuplicatesCount = 0;
+      bool dialogDismissed = false;
+
       for (var routine in generatedRoutines) {
-        final docRef = FirebaseFirestore.instance.collection('users').doc(user.uid).collection('routines').doc();
         final String routineName = routine['name'] ?? routine['routineName'] ?? 'Custom Routine';
         final String routineLevel = routine['fitnessLevel'] ?? routine['level'] ?? difficulty;
-        final String routineCategory = routine['category'] ?? 'Full Body';
+
+        // Normalize routine category
+        String routineCategory = routine['category'] ?? 'Full Body';
+        if (targetCategory != null && targetCategory.isNotEmpty && targetCategory != "All") {
+          routineCategory = targetCategory;
+        } else {
+          final lowerCat = routineCategory.toLowerCase();
+          if (lowerCat == 'waist' || lowerCat == 'abs' || lowerCat == 'abdominals') {
+            routineCategory = 'Core';
+          }
+        }
+
         final String routineImage = routine['imageUrl'] ?? routine['image'] ?? 'https://images.unsplash.com/photo-1517836357463-d25dfeac3438?w=400';
         final List<dynamic> rawExercises = routine['exercises'] ?? [];
 
-        final List<Map<String, dynamic>> normalizedExercises = rawExercises.map((e) {
+        final List<Map<String, dynamic>> normalizedExercises = [];
+        for (var e in rawExercises) {
           if (e is Map) {
-            final String exName = e['name'] ?? e['exerciseName'] ?? 'Exercise';
-            final String target = e['target'] ?? e['category'] ?? 'Full Body';
-            final String exEquipment = e['equipment'] ?? 'General';
+            final String exName = e['name'] ?? e['exerciseName'] ?? '';
+            if (exName.trim().isEmpty) continue;
+
+            String target = e['target'] ?? e['category'] ?? routineCategory;
+            final lowerTarget = target.toLowerCase();
+            if (lowerTarget == 'abs' || lowerTarget == 'waist' || lowerTarget == 'abdominals') {
+              target = 'Core';
+            }
+
+            final String exEquipment = e['equipment'] ?? 'Bodyweight';
             final String setsReps = e['sets']?.toString() ?? '3 sets x 10 reps';
             final String instructions = e['instructions'] ?? e['desc'] ?? '';
             final String exImage = e['imageUrl'] ?? e['image'] ?? '';
+            final dynamic durationSec = e['durationSeconds'] ?? e['duration'];
 
-            return {
+            final exData = <String, dynamic>{
               'name': exName,
               'exerciseName': exName,
               'target': target,
@@ -218,18 +248,126 @@ class _WorkoutHubScreenState extends State<WorkoutHubScreen> {
               'sets': setsReps,
               'instructions': instructions,
               'desc': instructions,
-              if (exImage.isNotEmpty) 'imageUrl': exImage,
-              if (exImage.isNotEmpty) 'image': exImage,
             };
+            if (durationSec != null) exData['durationSeconds'] = durationSec;
+            if (exImage.isNotEmpty) {
+              exData['imageUrl'] = exImage;
+              exData['image'] = exImage;
+            }
+            normalizedExercises.add(exData);
+          } else if (e != null && e.toString().trim().isNotEmpty) {
+            normalizedExercises.add({
+              'name': e.toString(),
+              'exerciseName': e.toString(),
+              'target': routineCategory,
+              'category': routineCategory,
+              'equipment': 'Bodyweight',
+              'sets': '3 sets x 10 reps',
+            });
           }
-          return {'name': e.toString(), 'exerciseName': e.toString()};
-        }).toList();
+        }
+
+        // Validation gate: Never persist empty routines
+        if (normalizedExercises.isEmpty) {
+          debugPrint("Validation gate: Skipping empty routine '$routineName'");
+          continue;
+        }
+
+        // 1. Calculate routine signature to check for exact duplicates
+        final candidateSignature = WorkoutRoutine.generateRoutineSignature(
+          name: routineName,
+          category: routineCategory,
+          fitnessLevel: routineLevel,
+          exerciseNames: normalizedExercises.map((e) => e['name'].toString()).toList(),
+        );
+
+        if (existingSignatures.contains(candidateSignature)) {
+          debugPrint("[WorkoutHub] Routine '$routineName' ($candidateSignature) already exists. Skipping duplicate save.");
+          skippedDuplicatesCount++;
+          continue;
+        }
+
+        // 2. Near-duplicate similarity check (Jaccard similarity >= 0.70)
+        final candidateExSet = normalizedExercises
+            .map((e) => e['name'].toString().trim().toLowerCase().replaceAll(RegExp(r'\s+'), ' '))
+            .where((e) => e.isNotEmpty)
+            .toSet();
+
+        WorkoutRoutine? nearDuplicateRoutine;
+        double maxSimilarity = 0.0;
+        for (final existing in existingRoutinesList) {
+          final catMatch = RoutineCategoryClassifier.matchesCategory(existing.category, routineCategory) ||
+              existing.category.trim().toLowerCase() == routineCategory.trim().toLowerCase();
+          if (catMatch && existing.level.displayName.toLowerCase() == routineLevel.toLowerCase()) {
+            final sim = WorkoutRoutine.calculateExerciseSimilarity(candidateExSet, existing.normalizedExerciseSet);
+            if (sim >= 0.70 && sim > maxSimilarity) {
+              maxSimilarity = sim;
+              nearDuplicateRoutine = existing;
+            }
+          }
+        }
+
+        if (nearDuplicateRoutine != null) {
+          debugPrint("[WorkoutHub] Near duplicate detected: '$routineName' vs '${nearDuplicateRoutine.title}' (Similarity: ${(maxSimilarity * 100).toStringAsFixed(1)}%)");
+          if (mounted) {
+            if (!dialogDismissed) {
+              Navigator.pop(context); // Dismiss loading dialog
+              dialogDismissed = true;
+            }
+            final bool? saveAnyway = await showDialog<bool>(
+              context: context,
+              barrierDismissible: false,
+              builder: (ctx) => AlertDialog(
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                title: const Row(
+                  children: [
+                    Icon(Icons.info_outline, color: Colors.orange),
+                    SizedBox(width: 8),
+                    Text("Similar Routine Exists", style: TextStyle(fontSize: 16)),
+                  ],
+                ),
+                content: Text(
+                  "A very similar routine ('${nearDuplicateRoutine!.title}') already exists in your library with ${(maxSimilarity * 100).toInt()}% matching exercises.\n\nWould you like to use your existing routine or save this new variation anyway?",
+                  style: const TextStyle(fontSize: 13, height: 1.4),
+                ),
+                actions: [
+                  TextButton(
+                    onPressed: () => Navigator.pop(ctx, false),
+                    child: const Text("Use Existing", style: TextStyle(color: Colors.teal, fontWeight: FontWeight.bold)),
+                  ),
+                  ElevatedButton(
+                    onPressed: () => Navigator.pop(ctx, true),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.teal,
+                      foregroundColor: Colors.white,
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                    ),
+                    child: const Text("Save Anyway"),
+                  ),
+                ],
+              ),
+            );
+
+            if (saveAnyway != true) {
+              // User chose "Use Existing"
+              setState(() => _isGeneratingAi = false);
+              _openRoutineDetails(nearDuplicateRoutine);
+              return;
+            }
+          }
+        }
+
+        existingSignatures.add(candidateSignature);
+
+        final docRef = FirebaseFirestore.instance.collection('users').doc(user.uid).collection('routines').doc();
+        validRoutinesCount++;
 
         batch.set(docRef, {
           'name': routineName,
           'routineName': routineName,
           'category': routineCategory,
-          'fitnessGoal': userGoal,
+          'fitnessGoal': effectiveGoal,
+          'goal': effectiveGoal,
           'fitnessLevel': routineLevel,
           'level': routineLevel,
           'source': 'ai_generated',
@@ -241,14 +379,39 @@ class _WorkoutHubScreenState extends State<WorkoutHubScreen> {
         });
       }
 
+      if (validRoutinesCount == 0) {
+        if (skippedDuplicatesCount > 0) {
+          if (mounted) {
+            if (!dialogDismissed) {
+              Navigator.pop(context); // Dismiss dialog
+              dialogDismissed = true;
+            }
+            setState(() => _isGeneratingAi = false);
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text("A similar routine already exists in Your Routines."),
+                backgroundColor: Colors.orange,
+              ),
+            );
+          }
+          return;
+        }
+        throw Exception("AI service could not generate valid exercises. Please try again.");
+      }
+
       await batch.commit();
 
       if (mounted) {
-        Navigator.pop(context); // Dismiss dialog
+        if (!dialogDismissed) {
+          Navigator.pop(context); // Dismiss dialog
+          dialogDismissed = true;
+        }
         setState(() => _isGeneratingAi = false);
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text("New AI Routine generated and added to your routines! 🎉"),
+          SnackBar(
+            content: Text(skippedDuplicatesCount > 0
+                ? "Personalized routine saved! (Skipped $skippedDuplicatesCount existing duplicate) 🎉"
+                : "New AI Routine generated and added to your routines! 🎉"),
             backgroundColor: Colors.teal,
           ),
         );
@@ -259,7 +422,7 @@ class _WorkoutHubScreenState extends State<WorkoutHubScreen> {
         setState(() => _isGeneratingAi = false);
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
-            content: Text("Unable to generate plan. Please try again."),
+            content: Text("Unable to generate a suitable workout for your current preferences. Try adjusting equipment or workout type."),
             backgroundColor: Colors.redAccent,
           ),
         );
@@ -348,6 +511,12 @@ class _WorkoutHubScreenState extends State<WorkoutHubScreen> {
           final userData = (userSnapshot.data?.data() as Map<String, dynamic>?) ?? {};
           final String userGoal = userData['fitnessGoal'] ?? userData['goal'] ?? "Maintenance";
           final String userLevel = userData['fitnessLevel'] ?? userData['level'] ?? "Beginner";
+          List<String> preferredWorkoutTypes = [];
+          if (userData['preferredWorkoutTypes'] is List) {
+            preferredWorkoutTypes = List<String>.from(
+              (userData['preferredWorkoutTypes'] as List).map((e) => e.toString()),
+            );
+          }
 
           return StreamBuilder<QuerySnapshot>(
             stream: FirebaseFirestore.instance
@@ -399,29 +568,86 @@ class _WorkoutHubScreenState extends State<WorkoutHubScreen> {
                   }
 
                   final routineDocs = routinesSnapshot.data?.docs ?? [];
-                  final List<WorkoutRoutine> routines = routineDocs.map((doc) {
+                  final List<WorkoutRoutine> rawRoutines = routineDocs.map((doc) {
                     return WorkoutRoutine.fromFirestore(doc.id, doc.data() as Map<String, dynamic>);
                   }).toList();
 
+                  // Deduplicate routines by deterministic signature:
+                  // Prevents duplicate display when duplicate Firestore documents exist.
+                  // Prefers the most complete routine (most exercises or valid banner image).
+                  final Map<String, WorkoutRoutine> uniqueRoutinesMap = {};
+                  final List<String> duplicateDocIds = [];
+
+                  for (final r in rawRoutines) {
+                    final sig = r.signature;
+                    if (!uniqueRoutinesMap.containsKey(sig)) {
+                      uniqueRoutinesMap[sig] = r;
+                    } else {
+                      duplicateDocIds.add(r.id);
+                      final existing = uniqueRoutinesMap[sig]!;
+                      // Prefer routine with more exercises or non-empty banner image
+                      if (r.exercises.length > existing.exercises.length ||
+                          ((r.bannerImageUrl != null && r.bannerImageUrl!.isNotEmpty) &&
+                           (existing.bannerImageUrl == null || existing.bannerImageUrl!.isEmpty))) {
+                        uniqueRoutinesMap[sig] = r;
+                      }
+                    }
+                  }
+
+                  if (duplicateDocIds.isNotEmpty) {
+                    debugPrint("[WorkoutHub] Deduplicated ${duplicateDocIds.length} duplicate routines from view: $duplicateDocIds");
+                  }
+
+                  final List<WorkoutRoutine> routines = uniqueRoutinesMap.values.toList();
+
                   // Select ONE Featured Routine (Today's / Recommended):
-                  // Priority: AI-generated routine matching goal/level, or first routine
+                  // Real Level & Preference Priority:
+                  // 1. Strict Level Enforcement: routines matching user's current fitnessLevel
+                  // 2. Prioritize routines matching preferredWorkoutTypes
+                  // 3. Prioritize routines matching userGoal
                   WorkoutRoutine? featuredRoutine;
                   if (routines.isNotEmpty) {
-                    featuredRoutine = routines.firstWhere(
+                    final cleanUserLevel = userLevel.toLowerCase();
+                    final sameLevelRoutines = routines.where(
+                      (r) => r.level.displayName.toLowerCase() == cleanUserLevel,
+                    ).toList();
+
+                    // Candidate pool: strictly matching level if any exist; otherwise fallback to all
+                    final candidatePool = sameLevelRoutines.isNotEmpty ? sameLevelRoutines : routines;
+
+                    // Rank within candidate pool
+                    featuredRoutine = candidatePool.firstWhere(
                       (r) => r.isAiGenerated &&
-                             (r.goal.displayName.toLowerCase() == userGoal.toLowerCase() ||
-                              r.level.displayName.toLowerCase() == userLevel.toLowerCase()),
-                      orElse: () => routines.firstWhere(
-                        (r) => r.goal.displayName.toLowerCase() == userGoal.toLowerCase(),
-                        orElse: () => routines.first,
+                             preferredWorkoutTypes.any((pref) => RoutineCategoryClassifier.matchesRoutine(r, pref)) &&
+                             r.goal.displayName.toLowerCase() == userGoal.toLowerCase(),
+                      orElse: () => candidatePool.firstWhere(
+                        (r) => r.isAiGenerated &&
+                               preferredWorkoutTypes.any((pref) => RoutineCategoryClassifier.matchesRoutine(r, pref)),
+                        orElse: () => candidatePool.firstWhere(
+                          (r) => r.isAiGenerated &&
+                                 r.goal.displayName.toLowerCase() == userGoal.toLowerCase(),
+                          orElse: () => candidatePool.firstWhere(
+                            (r) => r.isAiGenerated,
+                            orElse: () => candidatePool.first,
+                          ),
+                        ),
                       ),
                     );
                   }
 
-                  // Filter for "Your Routines" list
+                  // Filter for "Your Routines" list using centralized multi-tier classifier
                   final filteredRoutines = _selectedCategory == "All"
                       ? routines
-                      : routines.where((r) => r.category.toLowerCase().contains(_selectedCategory.toLowerCase())).toList();
+                      : routines.where((r) => RoutineCategoryClassifier.matchesRoutine(r, _selectedCategory)).toList();
+
+                  // Cluster routines by exercise similarity (Jaccard similarity >= 0.70)
+                  final clusters = RoutineCluster.clusterRoutines(filteredRoutines);
+
+                  // Restructure "All" information density:
+                  // Show max 5 routine clusters initially, with expandable "View All X Routines" button
+                  final displayedClusters = (_selectedCategory == "All" && !_showAllRoutines && clusters.length > 5)
+                      ? clusters.take(5).toList()
+                      : clusters;
 
                   return SingleChildScrollView(
                     physics: const BouncingScrollPhysics(),
@@ -444,7 +670,7 @@ class _WorkoutHubScreenState extends State<WorkoutHubScreen> {
 
                         const SizedBox(height: 16),
 
-                        // 3. Section Header: "Your Routines" + Action to Generate
+                        // 3. Section Header: "Your Routines" + Actions (Build My Own & Generate)
                         Padding(
                           padding: const EdgeInsets.symmetric(horizontal: 20),
                           child: Row(
@@ -458,13 +684,41 @@ class _WorkoutHubScreenState extends State<WorkoutHubScreen> {
                                   color: Colors.black87,
                                 ),
                               ),
-                              TextButton.icon(
-                                onPressed: () => _generateAiPlan(userGoal, userLevel),
-                                icon: const Icon(Icons.auto_awesome, size: 15, color: Colors.teal),
-                                label: const Text(
-                                  "Generate Plan",
-                                  style: TextStyle(color: Colors.teal, fontWeight: FontWeight.bold, fontSize: 13),
-                                ),
+                              Row(
+                                children: [
+                                  OutlinedButton.icon(
+                                    onPressed: () => _openBuildMyOwnRoutine(),
+                                    icon: const Icon(Icons.add, size: 14),
+                                    label: const Text(
+                                      "Build My Own",
+                                      style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
+                                    ),
+                                    style: OutlinedButton.styleFrom(
+                                      foregroundColor: Colors.teal,
+                                      side: const BorderSide(color: Colors.teal),
+                                      visualDensity: VisualDensity.compact,
+                                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                                    ),
+                                  ),
+                                  const SizedBox(width: 6),
+                                  TextButton.icon(
+                                    onPressed: () => _generateAiPlan(
+                                      userGoal,
+                                      userLevel,
+                                      targetCategory: _selectedCategory != "All" ? _selectedCategory : null,
+                                    ),
+                                    icon: const Icon(Icons.auto_awesome, size: 14, color: Colors.teal),
+                                    label: const Text(
+                                      "Generate",
+                                      style: TextStyle(color: Colors.teal, fontWeight: FontWeight.bold, fontSize: 12),
+                                    ),
+                                    style: TextButton.styleFrom(
+                                      visualDensity: VisualDensity.compact,
+                                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+                                    ),
+                                  ),
+                                ],
                               ),
                             ],
                           ),
@@ -507,11 +761,45 @@ class _WorkoutHubScreenState extends State<WorkoutHubScreen> {
 
                         const SizedBox(height: 10),
 
-                        // 5. Routines List
-                        if (filteredRoutines.isEmpty)
+                        // 5. Routines List (Clustered to avoid endlessly long flat lists)
+                        if (clusters.isEmpty)
                           _buildEmptyRoutinesList(_selectedCategory, userGoal, userLevel)
-                        else
-                          ...filteredRoutines.map((routine) => _buildRoutineTile(routine)),
+                        else ...[
+                          ...displayedClusters.map((cluster) => _buildRoutineTile(
+                                cluster.primary,
+                                variationCount: cluster.variations.length,
+                                variations: cluster.variations,
+                              )),
+                          if (_selectedCategory == "All" && clusters.length > 5)
+                            Padding(
+                              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                              child: Center(
+                                child: !_showAllRoutines
+                                    ? OutlinedButton.icon(
+                                        onPressed: () => setState(() => _showAllRoutines = true),
+                                        icon: const Icon(Icons.keyboard_arrow_down_rounded, size: 18),
+                                        label: Text(
+                                          "View All (${clusters.length}) Routines",
+                                          style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
+                                        ),
+                                        style: OutlinedButton.styleFrom(
+                                          foregroundColor: Colors.teal,
+                                          side: BorderSide(color: Colors.teal.shade300),
+                                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                                          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+                                        ),
+                                      )
+                                    : TextButton.icon(
+                                        onPressed: () => setState(() => _showAllRoutines = false),
+                                        icon: const Icon(Icons.keyboard_arrow_up_rounded, size: 18, color: Colors.grey),
+                                        label: const Text(
+                                          "Show Less",
+                                          style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: Colors.grey),
+                                        ),
+                                      ),
+                              ),
+                            ),
+                        ],
 
                         const SizedBox(height: 20),
 
@@ -625,11 +913,15 @@ class _WorkoutHubScreenState extends State<WorkoutHubScreen> {
             width: double.infinity,
             height: 48,
             child: ElevatedButton.icon(
-              onPressed: () => _generateAiPlan(goal, level),
+              onPressed: () => _generateAiPlan(
+                goal,
+                level,
+                targetCategory: _selectedCategory != "All" ? _selectedCategory : null,
+              ),
               icon: const Icon(Icons.auto_awesome, size: 20),
-              label: const Text(
-                "Generate Workout Plan",
-                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15),
+              label: Text(
+                _selectedCategory != "All" ? "Generate $_selectedCategory Plan" : "Generate Workout Plan",
+                style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15),
               ),
               style: ElevatedButton.styleFrom(
                 backgroundColor: Colors.teal,
@@ -664,9 +956,28 @@ class _WorkoutHubScreenState extends State<WorkoutHubScreen> {
             ),
             const SizedBox(height: 4),
             Text(
-              "Tap 'Generate Plan' to create personalized routines.",
+              category == "All"
+                  ? "Tap 'Generate Plan' to create personalized routines."
+                  : "Tap below to create a personalized $category workout.",
               textAlign: TextAlign.center,
               style: TextStyle(color: Colors.grey.shade600, fontSize: 12),
+            ),
+            const SizedBox(height: 14),
+            ElevatedButton.icon(
+              onPressed: () => _generateAiPlan(
+                goal,
+                level,
+                targetCategory: category != "All" ? category : null,
+              ),
+              icon: const Icon(Icons.auto_awesome, size: 16),
+              label: Text(category == "All" ? "Generate Workout Plan" : "Generate $category Plan"),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.teal,
+                foregroundColor: Colors.white,
+                elevation: 1,
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+              ),
             ),
           ],
         ),
@@ -674,7 +985,75 @@ class _WorkoutHubScreenState extends State<WorkoutHubScreen> {
     );
   }
 
-  Widget _buildRoutineTile(WorkoutRoutine routine) {
+  void _showVariationsModal(WorkoutRoutine primary, List<WorkoutRoutine> variations) {
+    showModalBottomSheet(
+      context: context,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      builder: (ctx) => Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Text(
+                  "Similar Variations (${variations.length + 1})",
+                  style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+                ),
+                IconButton(icon: const Icon(Icons.close, size: 20), onPressed: () => Navigator.pop(ctx)),
+              ],
+            ),
+            const SizedBox(height: 4),
+            Text(
+              "Variations of '${primary.title}' with high exercise overlap:",
+              style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
+            ),
+            const SizedBox(height: 12),
+            Flexible(
+              child: ListView(
+                shrinkWrap: true,
+                children: [
+                  ListTile(
+                    contentPadding: EdgeInsets.zero,
+                    title: Text(primary.title, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+                    subtitle: Text("${primary.exercises.length} exercises • Primary"),
+                    trailing: OutlinedButton(
+                      onPressed: () {
+                        Navigator.pop(ctx);
+                        _openRoutineDetails(primary);
+                      },
+                      child: const Text("View", style: TextStyle(fontSize: 12)),
+                    ),
+                  ),
+                  const Divider(height: 1),
+                  ...variations.map((v) => ListTile(
+                    contentPadding: EdgeInsets.zero,
+                    title: Text(v.title, style: const TextStyle(fontSize: 14)),
+                    subtitle: Text("${v.exercises.length} exercises"),
+                    trailing: OutlinedButton(
+                      onPressed: () {
+                        Navigator.pop(ctx);
+                        _openRoutineDetails(v);
+                      },
+                      child: const Text("View", style: TextStyle(fontSize: 12)),
+                    ),
+                  )),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildRoutineTile(
+    WorkoutRoutine routine, {
+    int variationCount = 0,
+    List<WorkoutRoutine>? variations,
+  }) {
     return Container(
       margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
       decoration: BoxDecoration(
@@ -723,28 +1102,41 @@ class _WorkoutHubScreenState extends State<WorkoutHubScreen> {
                         overflow: TextOverflow.ellipsis,
                       ),
                       const SizedBox(height: 4),
-                      Wrap(
-                        spacing: 6,
-                        runSpacing: 4,
-                        crossAxisAlignment: WrapCrossAlignment.center,
-                        children: [
-                          Container(
+                      Text(
+                        "${routine.level.displayName} • ${routine.category} • ${routine.primaryEquipment}",
+                        style: TextStyle(
+                          fontSize: 11,
+                          fontWeight: FontWeight.w500,
+                          color: Colors.grey.shade600,
+                        ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      if (variationCount > 0) ...[
+                        const SizedBox(height: 4),
+                        GestureDetector(
+                          onTap: variations != null && variations.isNotEmpty ? () => _showVariationsModal(routine, variations) : null,
+                          child: Container(
                             padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                             decoration: BoxDecoration(
-                              color: routine.level.badgeColor.withValues(alpha: 0.12),
+                              color: Colors.teal.shade50,
                               borderRadius: BorderRadius.circular(4),
+                              border: Border.all(color: Colors.teal.shade200),
                             ),
-                            child: Text(
-                              routine.level.displayName,
-                              style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: routine.level.badgeColor),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(Icons.copy_all_rounded, size: 11, color: Colors.teal.shade700),
+                                const SizedBox(width: 3),
+                                Text(
+                                  "+$variationCount similar variation${variationCount > 1 ? 's' : ''}",
+                                  style: TextStyle(fontSize: 10, color: Colors.teal.shade800, fontWeight: FontWeight.bold),
+                                ),
+                              ],
                             ),
                           ),
-                          Text(
-                            "${routine.durationMinutes} min • ${routine.exercises.length} exercises",
-                            style: TextStyle(fontSize: 11, color: Colors.grey.shade600),
-                          ),
-                        ],
-                      ),
+                        ),
+                      ],
                     ],
                   ),
                 ),
@@ -764,16 +1156,41 @@ class _WorkoutHubScreenState extends State<WorkoutHubScreen> {
                   child: const Text("Start", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
                 ),
 
-                // Overflow Menu (Delete)
+                // Overflow Menu (Customize/Copy & Delete & Variations)
                 PopupMenuButton<String>(
                   icon: const Icon(Icons.more_vert, size: 18, color: Colors.grey),
                   padding: EdgeInsets.zero,
                   onSelected: (val) {
-                    if (val == 'delete') {
+                    if (val == 'customize') {
+                      _openBuildMyOwnRoutine(routine);
+                    } else if (val == 'delete') {
                       _deleteRoutine(routine.id);
+                    } else if (val == 'variations' && variations != null && variations.isNotEmpty) {
+                      _showVariationsModal(routine, variations);
                     }
                   },
                   itemBuilder: (context) => [
+                    if (variationCount > 0 && variations != null && variations.isNotEmpty)
+                      PopupMenuItem(
+                        value: 'variations',
+                        child: Row(
+                          children: [
+                            const Icon(Icons.copy_all_rounded, color: Colors.teal, size: 18),
+                            const SizedBox(width: 8),
+                            Text("Variations ($variationCount)", style: const TextStyle(color: Colors.black87, fontSize: 13)),
+                          ],
+                        ),
+                      ),
+                    const PopupMenuItem(
+                      value: 'customize',
+                      child: Row(
+                        children: [
+                          Icon(Icons.edit_note_rounded, color: Colors.teal, size: 18),
+                          SizedBox(width: 8),
+                          Text("Customize / Copy", style: TextStyle(color: Colors.black87, fontSize: 13)),
+                        ],
+                      ),
+                    ),
                     const PopupMenuItem(
                       value: 'delete',
                       child: Row(
