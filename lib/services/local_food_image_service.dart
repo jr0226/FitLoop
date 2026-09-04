@@ -167,4 +167,22 @@ class LocalFoodImageService {
     }
     return deletedCount;
   }
+
+  /// Clears all stored local food images completely (used during account deletion).
+  Future<void> clearAllImages() async {
+    try {
+      final dir = await getFoodImagesDirectory();
+      if (await dir.exists()) {
+        final entities = dir.listSync();
+        for (final entity in entities) {
+          if (entity is File) {
+            await entity.delete();
+          }
+        }
+        debugPrint("[LocalFoodImage] Successfully cleared all local food images.");
+      }
+    } catch (e) {
+      debugPrint("[LocalFoodImage] Error clearing all food images: $e");
+    }
+  }
 }

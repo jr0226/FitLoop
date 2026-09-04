@@ -46,6 +46,9 @@ class FoodAnalysisResponse(BaseModel):
     score: int = 0
     explanation: str = ""
     alternatives: List[str] = Field(default_factory=list)
+    dietCompatibility: Optional[str] = "compatible"
+    dietNotice: Optional[str] = None
+    allergyNotice: Optional[str] = None
 
 
 @router.post("/ai/analyze-food", response_model=FoodAnalysisResponse)

@@ -6,6 +6,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:http/http.dart' as http;
 import 'package:http_parser/http_parser.dart';
 import '../config/app_config.dart';
+import 'diet_personalization_service.dart';
 
 class AiService {
   /// Analyzes a food image to calculate nutritional breakdown via the FitLoop backend API.
@@ -69,7 +70,11 @@ class AiService {
       if (response.statusCode == 200) {
         final data = json.decode(response.body);
         if (data is Map<String, dynamic>) {
-          return data;
+          return DietPersonalizationService.sanitizeAndEvaluate(
+            data,
+            dietPreference: dietPreference,
+            allergies: allergies,
+          );
         }
         throw const FormatException('Expected JSON map response from backend.');
       } else {

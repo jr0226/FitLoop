@@ -11,6 +11,9 @@ from main import app
 from services.gemini_service import (
     build_food_analysis_prompt,
     build_workout_recommendation_prompt,
+    sanitize_food_alternatives,
+    sanitize_recommendation_text,
+    evaluate_food_diet_compatibility,
 )
 
 
@@ -84,6 +87,219 @@ class TestAIPersonalization(unittest.IsolatedAsyncioTestCase):
         self.assertIn("Dietary Preference: Standard", prompt)
         self.assertIn("Allergies & Intolerances: None reported", prompt)
         self.assertNotIn("Daily Calorie Target:", prompt)
+
+    # ------------------------------------------
+    # TASK B TEST MATRIX PROFILES (A, B, C, D)
+    # ------------------------------------------
+
+    def test_food_matrix_profile_a_standard_no_allergies(self):
+        """PROFILE A: dietPreference: Standard, allergies: []"""
+        prompt = build_food_analysis_prompt(
+            user_goal="Maintenance",
+            diet_preference="Standard",
+            allergies=[],
+        )
+        self.assertIn("Dietary Preference: Standard", prompt)
+        self.assertIn("Allergies & Intolerances: None reported", prompt)
+        self.assertNotIn("Dietary Restrictions (Vegetarian)", prompt)
+        self.assertNotIn("Dietary Restrictions (Vegan)", prompt)
+        self.assertNotIn("Dietary Restrictions (Halal)", prompt)
+
+    def test_food_matrix_profile_b_vegetarian_no_allergies(self):
+        """PROFILE B: dietPreference: Vegetarian, allergies: []"""
+        prompt = build_food_analysis_prompt(
+            user_goal="Weight Loss",
+            diet_preference="Vegetarian",
+            allergies=[],
+        )
+        self.assertIn("Dietary Preference: Vegetarian", prompt)
+        self.assertIn("no meat/poultry for vegetarians", prompt)
+        self.assertIn("Suggestions MUST be plant-based, egg, or dairy", prompt)
+
+        # Verify sanitization blocks meat/poultry/fish
+        mock_ai_alts = ["Grilled Chicken Breast", "Steamed Tofu with Greens", "Salmon Fillet", "Boiled Egg Salad"]
+        sanitized = sanitize_food_alternatives(mock_ai_alts, diet_preference="Vegetarian", allergies=[])
+        self.assertIn("Steamed Tofu with Greens", sanitized)
+        self.assertIn("Boiled Egg Salad", sanitized)
+        self.assertNotIn("Grilled Chicken Breast", sanitized)
+        self.assertNotIn("Salmon Fillet", sanitized)
+
+    def test_food_matrix_profile_c_vegan_peanuts_allergy(self):
+        """PROFILE C: dietPreference: Vegan, allergies: [Peanuts]"""
+        prompt = build_food_analysis_prompt(
+            user_goal="Muscle Gain",
+            diet_preference="Vegan",
+            allergies=["Peanuts"],
+        )
+        self.assertIn("Dietary Preference: Vegan", prompt)
+        self.assertIn("no animal products for vegans", prompt)
+        self.assertIn("Suggestions MUST be 100% plant-based", prompt)
+        self.assertIn("Allergies & Intolerances: Peanuts", prompt)
+        self.assertIn("Allergy Safety: User is allergic or intolerant to: Peanuts", prompt)
+        self.assertIn("AI suggestions may not identify hidden ingredients or cross-contamination", prompt)
+
+        # Verify sanitization blocks animal products, dairy, eggs, and peanuts
+        mock_ai_alts = [
+            "Peanut Butter Toast",
+            "Greek Yogurt with Berries",
+            "Scrambled Eggs with Spinach",
+            "Tempeh Bowl with Avocado",
+            "Lentil Soup with Brown Rice"
+        ]
+        sanitized = sanitize_food_alternatives(mock_ai_alts, diet_preference="Vegan", allergies=["Peanuts"])
+        self.assertIn("Tempeh Bowl with Avocado", sanitized)
+        self.assertIn("Lentil Soup with Brown Rice", sanitized)
+        self.assertNotIn("Peanut Butter Toast", sanitized)
+        self.assertNotIn("Greek Yogurt with Berries", sanitized)
+        self.assertNotIn("Scrambled Eggs with Spinach", sanitized)
+
+    def test_food_matrix_profile_d_halal_shellfish_allergy(self):
+        """PROFILE D: dietPreference: Halal, allergies: [Shellfish]"""
+        prompt = build_food_analysis_prompt(
+            user_goal="Weight Loss",
+            diet_preference="Halal",
+            allergies=["Shellfish"],
+        )
+        self.assertIn("Dietary Preference: Halal", prompt)
+        self.assertIn("no pork, bacon, lard, ham, alcohol/wine", prompt)
+        self.assertIn("do not falsely state dishes are formally certified Halal without authoritative data", prompt)
+        self.assertIn("Allergies & Intolerances: Shellfish", prompt)
+        self.assertIn("Allergy Safety: User is allergic or intolerant to: Shellfish", prompt)
+
+        # Verify sanitization blocks pork, bacon, alcohol, and shellfish (shrimp, crab, prawn)
+        mock_ai_alts = [
+            "Crispy Bacon and Eggs",
+            "White Wine Pasta",
+            "Garlic Butter Prawns",
+            "Grilled Halal Chicken with Steamed Veggies",
+            "Beef Rendang with Brown Rice"
+        ]
+        sanitized = sanitize_food_alternatives(mock_ai_alts, diet_preference="Halal", allergies=["Shellfish"])
+        self.assertIn("Grilled Halal Chicken with Steamed Veggies", sanitized)
+        self.assertIn("Beef Rendang with Brown Rice", sanitized)
+        self.assertNotIn("Crispy Bacon and Eggs", sanitized)
+        self.assertNotIn("White Wine Pasta", sanitized)
+        self.assertNotIn("Garlic Butter Prawns", sanitized)
+
+    # ------------------------------------------
+    # DIET COMPATIBILITY & FACTUAL RECOGNITION TESTS
+    # ------------------------------------------
+
+    def test_case_vegan_scanning_chicken_rice(self):
+        """Vegan user scanning Chicken Rice: factual recognition, incompatible warning, vegan alternatives."""
+        detected_foods = [{"name": "Chicken Rice", "calories": 500, "proteins": 25, "carbs": 60, "fats": 15}]
+        compat = evaluate_food_diet_compatibility(detected_foods, diet_preference="Vegan")
+        self.assertEqual(compat["dietCompatibility"], "incompatible")
+        self.assertEqual(compat["dietNotice"], "This meal does not match your Vegan preference.")
+
+        # Factual recognition remains unchanged (not renamed to tofu)
+        self.assertEqual(detected_foods[0]["name"], "Chicken Rice")
+
+        # Alternatives strictly follow Vegan
+        raw_alts = ["Grilled Chicken Breast", "Tofu Rice Bowl", "Mushroom Vegetable Rice", "Boiled Egg"]
+        sanitized = sanitize_food_alternatives(raw_alts, diet_preference="Vegan")
+        self.assertIn("Tofu Rice Bowl", sanitized)
+        self.assertIn("Mushroom Vegetable Rice", sanitized)
+        self.assertNotIn("Grilled Chicken Breast", sanitized)
+        self.assertNotIn("Boiled Egg", sanitized)
+
+    def test_case_vegetarian_scanning_beef_burger(self):
+        """Vegetarian user scanning Beef Burger: factual recognition, warning, vegetarian alternatives."""
+        detected_foods = [{"name": "Beef Burger", "calories": 550, "proteins": 28, "carbs": 45, "fats": 25}]
+        compat = evaluate_food_diet_compatibility(detected_foods, diet_preference="Vegetarian")
+        self.assertEqual(compat["dietCompatibility"], "incompatible")
+        self.assertEqual(compat["dietNotice"], "This meal does not match your Vegetarian preference.")
+        self.assertEqual(detected_foods[0]["name"], "Beef Burger")
+
+        raw_alts = ["Turkey Burger", "Black Bean Veggie Burger", "Grilled Portobello Mushroom Burger"]
+        sanitized = sanitize_food_alternatives(raw_alts, diet_preference="Vegetarian")
+        self.assertIn("Black Bean Veggie Burger", sanitized)
+        self.assertIn("Grilled Portobello Mushroom Burger", sanitized)
+        self.assertNotIn("Turkey Burger", sanitized)
+
+    def test_case_pescatarian_scanning_grilled_fish(self):
+        """Pescatarian user scanning Grilled Fish: compatible, no warning."""
+        detected_foods = [{"name": "Grilled Fish", "calories": 300, "proteins": 35, "carbs": 0, "fats": 12}]
+        compat = evaluate_food_diet_compatibility(detected_foods, diet_preference="Pescatarian")
+        self.assertEqual(compat["dietCompatibility"], "compatible")
+        self.assertIsNone(compat["dietNotice"])
+
+    def test_case_halal_scanning_pork_dish(self):
+        """Halal user scanning Pork Dish: incompatible warning."""
+        detected_foods = [{"name": "Sweet and Sour Pork", "calories": 450, "proteins": 20, "carbs": 40, "fats": 18}]
+        compat = evaluate_food_diet_compatibility(detected_foods, diet_preference="Halal")
+        self.assertEqual(compat["dietCompatibility"], "incompatible")
+        self.assertEqual(compat["dietNotice"], "This meal does not match your Halal preference.")
+
+    def test_case_halal_scanning_chicken_caution(self):
+        """Halal user scanning general chicken/beef: caution notice because certification cannot be confirmed visually."""
+        detected_foods = [{"name": "Chicken Curry", "calories": 400, "proteins": 25, "carbs": 15, "fats": 20}]
+        compat = evaluate_food_diet_compatibility(detected_foods, diet_preference="Halal")
+        self.assertEqual(compat["dietCompatibility"], "caution")
+        self.assertEqual(compat["dietNotice"], "Halal suitability cannot be confirmed from image analysis alone.")
+
+    def test_case_standard_scanning_chicken_rice(self):
+        """Standard user scanning Chicken Rice: compatible, no diet warning."""
+        detected_foods = [{"name": "Chicken Rice", "calories": 500, "proteins": 25, "carbs": 60, "fats": 15}]
+        compat = evaluate_food_diet_compatibility(detected_foods, diet_preference="Standard")
+        self.assertEqual(compat["dietCompatibility"], "compatible")
+        self.assertIsNone(compat["dietNotice"])
+
+    def test_case_vegan_scanning_prawn_noodles_complete_pipeline(self):
+        """
+        Verify the complete pipeline for a Vegan user scanning Prawn Noodles:
+        1. Factual recognition: 'Penang Prawn Mee (Hae Mee)' remains preserved.
+        2. Compatibility: 'incompatible'.
+        3. Warning: 'This meal does not match your Vegan preference.'
+        4. Explanation sanitization: 'add extra chicken' or 'boiled egg' is sanitized to plant-based protein.
+        5. Alternatives sanitization: animal alternatives ('Dry Prawn Mee', 'Ipoh Hor Fun with shredded chicken')
+           are removed and replaced with 100% plant-based options.
+        """
+        detected_foods = [
+            {
+                "name": "Penang Prawn Mee (Hae Mee)",
+                "calories": 510,
+                "proteins": 24,
+                "carbs": 68,
+                "fats": 16,
+            }
+        ]
+
+        # 1. Compatibility
+        compat = evaluate_food_diet_compatibility(detected_foods, diet_preference="Vegan")
+        self.assertEqual(compat["dietCompatibility"], "incompatible")
+        self.assertEqual(compat["dietNotice"], "This meal does not match your Vegan preference.")
+        # Factual food name must be intact
+        self.assertEqual(detected_foods[0]["name"], "Penang Prawn Mee (Hae Mee)")
+
+        # 2. Explanation sanitization
+        raw_explanation = (
+            "The Penang Prawn Mee is low in plant protein. "
+            "To hit your muscle gain goals, consider adding extra chicken breast or a hard-boiled egg."
+        )
+        sanitized_exp = sanitize_recommendation_text(raw_explanation, diet_preference="Vegan")
+        # Prohibited terms must NOT appear in the recommendation
+        self.assertNotIn("chicken", sanitized_exp.lower())
+        self.assertNotIn("egg", sanitized_exp.lower())
+        # Plant-based protein must be suggested instead
+        self.assertTrue(
+            "tofu" in sanitized_exp.lower() or "tempeh" in sanitized_exp.lower() or "edamame" in sanitized_exp.lower() or "plant-based" in sanitized_exp.lower()
+        )
+
+        # 3. Alternatives sanitization
+        raw_alts = [
+            "Dry Prawn Mee (to consume less broth and reduce sodium intake)",
+            "Ipoh Hor Fun (with shredded chicken and prawns in a lighter broth)"
+        ]
+        sanitized_alts = sanitize_food_alternatives(raw_alts, diet_preference="Vegan")
+        for alt in sanitized_alts:
+            alt_lower = alt.lower()
+            self.assertNotIn("prawn", alt_lower)
+            self.assertNotIn("chicken", alt_lower)
+            self.assertNotIn("meat", alt_lower)
+            self.assertNotIn("egg", alt_lower)
+        # Curated fallback must ensure list is not empty
+        self.assertGreater(len(sanitized_alts), 0)
 
     # ==========================================
     # WORKOUT AI PERSONALIZATION PROMPT TESTS

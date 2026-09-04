@@ -72,11 +72,12 @@ def build_food_analysis_prompt(
         "",
         "CRITICAL VISUAL RECOGNITION RULES:",
         "1. VISIBLE EVIDENCE ONLY: Identify ONLY foods and beverages visibly present in the image.",
-        "2. NO INVISIBLE INGREDIENTS: Do NOT list hidden cooking oils, pinch of salt, raw spices, or standard invisible recipe ingredients as separate food items.",
-        "3. MULTI-FOOD DISHES: For mixed plates (e.g. Nasi Lemak, Chicken Rice plate, mixed rice plate), break down the dish into its distinct visible items (e.g., Rice, Fried Chicken, Boiled Egg, Sambal, Cucumber) with their respective portion sizes.",
-        "4. NO DUPLICATE ENTRIES: Never list the same food component more than once under different names.",
-        "5. STANDARDIZED CONCISE NAMES: Use standardized, recognized food names (e.g. 'Nasi Lemak', 'Chicken Rice', 'Char Kuey Teow', 'Roti Canai', 'French Fries', 'Fried Chicken', 'White Rice').",
-        "6. PORTION ESTIMATION: Estimate portion sizes conservatively in 'estimatedServingGrams' based on standard realistic human portions. Do NOT vary serving sizes arbitrarily when the visual food portion is unchanged.",
+        "2. OBJECTIVE FACTUAL RECOGNITION (NO DIET BIAS): Factually identify the actual food visible in the image regardless of user diet preferences or allergies. If a Vegan user scans Chicken Rice, factually identify 'Chicken Rice'. NEVER rename, alter, or censor detected foods to match user preferences (never pretend chicken is tofu). Dietary preferences apply strictly to recommendations.",
+        "3. NO INVISIBLE INGREDIENTS: Do NOT list hidden cooking oils, pinch of salt, raw spices, or standard invisible recipe ingredients as separate food items.",
+        "4. MULTI-FOOD DISHES: For mixed plates (e.g. Nasi Lemak, Chicken Rice plate, mixed rice plate), break down the dish into its distinct visible items (e.g., Rice, Fried Chicken, Boiled Egg, Sambal, Cucumber) with their respective portion sizes.",
+        "5. NO DUPLICATE ENTRIES: Never list the same food component more than once under different names.",
+        "6. STANDARDIZED CONCISE NAMES: Use standardized, recognized food names (e.g. 'Nasi Lemak', 'Chicken Rice', 'Char Kuey Teow', 'Roti Canai', 'French Fries', 'Fried Chicken', 'White Rice').",
+        "7. PORTION ESTIMATION: Estimate portion sizes conservatively in 'estimatedServingGrams' based on standard realistic human portions. Do NOT vary serving sizes arbitrarily when the visual food portion is unchanged.",
         "",
         "USER PROFILE & CONTEXT:",
         f"- Fitness Goal: {clean_goal}",
@@ -95,21 +96,43 @@ def build_food_analysis_prompt(
     prompt_lines.extend([
         "",
         "PERSONALIZATION GUIDELINES:",
-        f"1. Score Reasoning: Evaluate nutritional balance and macro ratios specifically against the user's '{clean_goal}' goal (0-100 scale).",
+        f"1. Score Reasoning: Evaluate nutritional balance and macro ratios specifically against the user's '{clean_goal}' goal (0-100 scale). Tailor the 'explanation' to comment on this alignment.",
     ])
 
-    if clean_diet.lower() in ("vegetarian", "vegan", "pescatarian", "halal"):
+    diet_lower = clean_diet.lower()
+    if diet_lower in ("vegetarian", "vegan", "pescatarian", "halal"):
+        if diet_lower == "vegetarian":
+            prompt_lines.append(
+                f"2. Dietary Restrictions: User follows a '{clean_diet}' diet. NEVER recommend alternatives containing ingredients prohibited under this diet (e.g. no meat/poultry for vegetarians, no chicken, beef, pork, fish, prawns). Suggestions MUST be plant-based, egg, or dairy."
+            )
+        elif diet_lower == "vegan":
+            prompt_lines.append(
+                f"2. Dietary Restrictions: User follows a '{clean_diet}' diet. NEVER recommend alternatives or suggestions containing ingredients prohibited under this diet (e.g. no animal products for vegans: no meat, poultry, seafood, dairy, eggs, chicken, beef, pork, fish, prawns). Suggestions MUST be 100% plant-based. All protein suggestions and actionable tips in BOTH 'explanation' and 'alternatives' MUST be 100% plant-based (e.g. tofu, tempeh, lentils, edamame, beans). NEVER recommend 'add extra chicken' or 'add an egg' for vegan users."
+            )
+        elif diet_lower == "pescatarian":
+            prompt_lines.append(
+                f"2. Dietary Restrictions: User follows a '{clean_diet}' diet. NEVER recommend alternatives containing ingredients prohibited under this diet (e.g. may include fish/seafood, but no red meat or poultry like chicken, beef, pork). Suggestions MUST avoid meat/poultry."
+            )
+        elif diet_lower == "halal":
+            prompt_lines.append(
+                f"2. Dietary Restrictions: User follows a '{clean_diet}' diet. NEVER recommend alternatives containing ingredients prohibited under this diet (e.g. no pork, bacon, lard, ham, alcohol/wine, or non-halal meat). Ensure suggestions are halal-suitable, but do not falsely state dishes are formally certified Halal without authoritative data."
+            )
+    elif diet_lower != "standard":
         prompt_lines.append(
-            f"2. Dietary Restrictions: User follows a '{clean_diet}' diet. NEVER recommend alternatives containing ingredients prohibited under this diet (e.g. no meat/poultry for vegetarians; no animal products for vegans; no pork/alcohol for halal)."
+            f"2. Dietary Restrictions: User follows a '{clean_diet}' diet. NEVER recommend alternatives containing ingredients prohibited under this diet."
         )
 
     if clean_allergies:
         prompt_lines.append(
-            f"3. Allergy Safety: User is allergic or intolerant to: {', '.join(clean_allergies)}. STRICTLY DO NOT suggest any meals, foods, or healthier alternatives containing these allergens."
+            f"3. Allergy Safety: User is allergic or intolerant to: {', '.join(clean_allergies)}. STRICTLY DO NOT suggest any meals, foods, or healthier alternatives containing these allergens ({', '.join(clean_allergies)})."
         )
         prompt_lines.append(
-            "4. Safety Disclaimer: Never claim a food in the image is 100% guaranteed allergen-safe based solely on visual inspection. Use allergy context to avoid recommending unsafe alternatives."
+            "4. Safety Disclaimer: Never claim a food in the image is 100% guaranteed allergen-safe based solely on visual inspection. AI suggestions may not identify hidden ingredients or cross-contamination. Use allergy context to avoid recommending unsafe alternatives."
         )
+
+    prompt_lines.append(
+        f"5. Output Personalization: BOTH the 'explanation' and 'alternatives' fields MUST actively adhere to the user's '{clean_diet}' dietary preference and strictly avoid listed allergens ({', '.join(clean_allergies) if clean_allergies else 'None'}). NEVER recommend non-compliant animal proteins in 'explanation'."
+    )
 
     prompt_lines.extend([
         "",
@@ -136,6 +159,256 @@ def build_food_analysis_prompt(
     ])
 
     return "\n".join(prompt_lines)
+
+
+def sanitize_food_alternatives(
+    alternatives: List[str],
+    diet_preference: str = "Standard",
+    allergies: Optional[List[str]] = None,
+) -> List[str]:
+    """
+    Sanitizes AI-generated food alternatives against dietary preference restrictions and reported allergens.
+    Removes any alternative that violates the user's dietary rules or contains listed allergens.
+    """
+    if not alternatives:
+        return []
+
+    clean_diet = (diet_preference or "Standard").strip().lower()
+    clean_allergies = [a.strip().lower() for a in (allergies or []) if a and a.strip()]
+
+    # Define forbidden tokens per diet
+    diet_forbidden: List[str] = []
+    if clean_diet == "vegetarian":
+        diet_forbidden = ["chicken", "beef", "pork", "mutton", "lamb", "duck", "fish", "salmon", "tuna", "prawn", "shrimp", "crab", "squid", "bacon", "turkey"]
+    elif clean_diet == "vegan":
+        diet_forbidden = [
+            "chicken", "beef", "pork", "mutton", "lamb", "duck", "fish", "salmon", "tuna", "prawn", "shrimp", "crab", "squid", "bacon", "turkey",
+            "egg", "eggs", "milk", "cheese", "yogurt", "yoghurt", "butter", "cream", "whey", "honey"
+        ]
+    elif clean_diet == "pescatarian":
+        diet_forbidden = ["chicken", "beef", "pork", "mutton", "lamb", "duck", "bacon", "turkey"]
+    elif clean_diet == "halal":
+        diet_forbidden = ["pork", "bacon", "lard", "ham", "alcohol", "wine", "beer", "mirin", "sake", "rum"]
+
+    # Allergen token map
+    allergen_map = {
+        "peanuts": ["peanut", "groundnut"],
+        "nuts": ["nut", "almond", "walnut", "cashew", "pecan", "hazelnut", "pistachio", "macadamia"],
+        "dairy": ["dairy", "milk", "cheese", "butter", "cream", "yogurt", "yoghurt", "whey"],
+        "shellfish": ["shellfish", "shrimp", "prawn", "crab", "lobster", "clam", "oyster", "mussel"],
+        "eggs": ["egg"],
+        "soy": ["soy", "soya", "tofu", "edamame", "tempeh"],
+        "fish": ["fish", "salmon", "tuna", "cod", "tilapia", "mackerel", "anchovy"],
+        "gluten": ["gluten", "wheat", "barley", "rye"],
+    }
+
+    allergy_forbidden: List[str] = []
+    for user_allergy in clean_allergies:
+        matched = False
+        for k, tokens in allergen_map.items():
+            if k in user_allergy or user_allergy in k:
+                allergy_forbidden.extend(tokens)
+                matched = True
+        if not matched:
+            allergy_forbidden.append(user_allergy)
+
+    sanitized: List[str] = []
+    for alt in alternatives:
+        if not alt or not isinstance(alt, str):
+            continue
+        alt_lower = alt.lower()
+
+        # Check diet restrictions
+        violation = False
+        import re
+        for term in diet_forbidden:
+            if re.search(rf"\b{re.escape(term)}s?\b", alt_lower):
+                logger.warning(f"Alternative '{alt}' removed due to dietary restriction '{clean_diet}' (matched '{term}').")
+                violation = True
+                break
+
+        if violation:
+            continue
+
+        # Check allergy restrictions
+        for term in allergy_forbidden:
+            if re.search(rf"\b{re.escape(term)}s?\b", alt_lower):
+                logger.warning(f"Alternative '{alt}' removed due to user allergy (matched '{term}').")
+                violation = True
+                break
+
+        if not violation:
+            sanitized.append(alt)
+
+    # If all alternatives were rejected by dietary rules, supply curated compliant alternatives
+    if not sanitized and clean_diet != "standard":
+        if clean_diet == "vegan":
+            sanitized = [
+                "Stir-Fried Vegan Mee Hoon with Tofu and Bok Choy",
+                "Vegetarian Clear Noodle Soup with Braised Tofu and Mushrooms",
+                "Spicy Tofu and Edamame Noodle Bowl (100% Plant-Based)"
+            ]
+        elif clean_diet == "vegetarian":
+            sanitized = [
+                "Vegetarian Clear Noodle Soup with Braised Tofu and Greens",
+                "Egg and Vegetable Fried Brown Rice with Extra Tofu",
+                "Stir-Fried Tofu, Paneer, and Seasonal Vegetables"
+            ]
+        elif clean_diet == "halal":
+            sanitized = [
+                "Mee Soup with Chicken Breast and Bok Choy",
+                "Grilled Chicken Rice with Steamed Greens and Fresh Chili Dip",
+                "Stir-Fried Rice Vermicelli with Tofu and Bean Sprouts"
+            ]
+
+    return sanitized
+
+
+def sanitize_recommendation_text(
+    text: str,
+    diet_preference: str = "Standard",
+    allergies: Optional[List[str]] = None,
+) -> str:
+    """
+    Sanitizes narrative recommendation text (such as 'explanation' or 'dietitianInsight')
+    to ensure actionable tips and protein suggestions never advocate prohibited animal products
+    (e.g. replacing 'add extra chicken' with plant-based protein like 'add extra firm tofu or tempeh' for Vegans).
+    """
+    if not text:
+        return ""
+
+    import re
+    clean_diet = (diet_preference or "Standard").strip().lower()
+    cleaned = text
+
+    if clean_diet == "vegan":
+        # Direct phrase replacements for common AI protein suggestions
+        cleaned = re.sub(r"\badd\s+extra\s+chicken(\s+breast)?\b", "add extra firm tofu or tempeh", cleaned, flags=re.IGNORECASE)
+        cleaned = re.sub(r"\badding\s+extra\s+chicken(\s+breast)?\b", "adding extra firm tofu or tempeh", cleaned, flags=re.IGNORECASE)
+        cleaned = re.sub(r"\badd\s+chicken(\s+breast)?\b", "add tofu or tempeh", cleaned, flags=re.IGNORECASE)
+        cleaned = re.sub(r"\badding\s+chicken(\s+breast)?\b", "adding tofu or tempeh", cleaned, flags=re.IGNORECASE)
+        cleaned = re.sub(r"\bpair\s+with\s+(grilled\s+)?chicken(\s+breast)?\b", "pair with grilled tempeh or tofu", cleaned, flags=re.IGNORECASE)
+        cleaned = re.sub(r"\b(a\s+)?(hard-)?boiled\s+egg\b", "steamed edamame", cleaned, flags=re.IGNORECASE)
+        cleaned = re.sub(r"\b(hard-)?boiled\s+eggs\b", "steamed edamame or hemp seeds", cleaned, flags=re.IGNORECASE)
+        cleaned = re.sub(r"\badd\s+(an\s+)?egg\b", "add edamame or tofu", cleaned, flags=re.IGNORECASE)
+        cleaned = re.sub(r"\badding\s+(an\s+)?egg\b", "adding edamame or tofu", cleaned, flags=re.IGNORECASE)
+        cleaned = re.sub(r"\badd\s+eggs\b", "add edamame or hemp seeds", cleaned, flags=re.IGNORECASE)
+        cleaned = re.sub(r"\badding\s+eggs\b", "adding edamame or hemp seeds", cleaned, flags=re.IGNORECASE)
+        cleaned = re.sub(r"\bgrilled\s+fish\b", "grilled tempeh", cleaned, flags=re.IGNORECASE)
+        cleaned = re.sub(r"\bextra\s+fish\b", "extra plant-based protein", cleaned, flags=re.IGNORECASE)
+        cleaned = re.sub(r"\bextra\s+meat\b", "extra plant-based protein", cleaned, flags=re.IGNORECASE)
+        cleaned = re.sub(r"\banimal\s+protein\b", "plant-based protein", cleaned, flags=re.IGNORECASE)
+        cleaned = re.sub(r"\bwhey\s+protein\b", "plant-based protein", cleaned, flags=re.IGNORECASE)
+        cleaned = re.sub(r"\bgreek\s+yogurt\b", "soy yogurt", cleaned, flags=re.IGNORECASE)
+
+        # Sentence-level check: if any recommendation sentence still advocates non-vegan animal products
+        sentences = re.split(r"(?<=[.!?])\s+", cleaned)
+        cleaned_sentences = []
+        rec_triggers = ("consider", "recommend", "suggest", "try", "add", "adding", "pair", "substitute", "boost", "increase", "opt")
+        forbidden = [
+            "chicken", "beef", "pork", "mutton", "lamb", "duck", "fish", "salmon", "tuna", "prawn", "shrimp",
+            "crab", "squid", "bacon", "turkey", "egg", "milk", "cheese", "yogurt", "butter", "honey"
+        ]
+        for s in sentences:
+            s_lower = s.lower()
+            is_rec = any(trig in s_lower for trig in rec_triggers)
+            has_forbidden = any(re.search(rf"\b{re.escape(f)}s?\b", s_lower) for f in forbidden)
+            if is_rec and has_forbidden:
+                cleaned_sentences.append("To boost protein while adhering to your Vegan diet, consider adding grilled tempeh, firm tofu, or edamame.")
+            else:
+                cleaned_sentences.append(s)
+        cleaned = " ".join(cleaned_sentences)
+
+    elif clean_diet == "vegetarian":
+        cleaned = re.sub(r"\badd\s+extra\s+chicken(\s+breast)?\b", "add extra tofu or eggs", cleaned, flags=re.IGNORECASE)
+        cleaned = re.sub(r"\badding\s+extra\s+chicken(\s+breast)?\b", "adding extra tofu or eggs", cleaned, flags=re.IGNORECASE)
+        cleaned = re.sub(r"\badd\s+chicken\b", "add tofu or eggs", cleaned, flags=re.IGNORECASE)
+        cleaned = re.sub(r"\bgrilled\s+fish\b", "grilled tofu or paneer", cleaned, flags=re.IGNORECASE)
+        cleaned = re.sub(r"\bextra\s+meat\b", "extra plant protein or eggs", cleaned, flags=re.IGNORECASE)
+
+    return cleaned.strip()
+
+
+def evaluate_food_diet_compatibility(
+    foods: List[Dict[str, Any]],
+    diet_preference: str = "Standard",
+    allergies: Optional[List[str]] = None,
+) -> Dict[str, Any]:
+    """
+    Compares detected food items against user's dietPreference and allergies without modifying
+    factual recognition. Returns status ('compatible', 'incompatible', 'caution') and user notices.
+    """
+    clean_diet = (diet_preference or "Standard").strip().lower()
+    clean_allergies = [a.strip().lower() for a in (allergies or []) if a and a.strip()]
+
+    food_names = [str(f.get("name", "")).lower() for f in foods if isinstance(f, dict) and f.get("name")]
+    all_text = " ".join(food_names)
+
+    diet_status = "compatible"
+    diet_notice = None
+
+    import re
+
+    if clean_diet == "vegan":
+        non_vegan = [
+            "chicken", "beef", "pork", "mutton", "lamb", "duck", "meat", "poultry",
+            "fish", "salmon", "tuna", "prawn", "shrimp", "crab", "squid", "seafood",
+            "egg", "eggs", "milk", "cheese", "butter", "yogurt", "yoghurt", "whey", "honey", "bacon"
+        ]
+        if any(re.search(rf"\b{re.escape(term)}s?\b", all_text) for term in non_vegan):
+            diet_status = "incompatible"
+            diet_notice = "This meal does not match your Vegan preference."
+
+    elif clean_diet == "vegetarian":
+        non_veg = [
+            "chicken", "beef", "pork", "mutton", "lamb", "duck", "meat", "poultry",
+            "fish", "salmon", "tuna", "prawn", "shrimp", "crab", "squid", "seafood", "bacon"
+        ]
+        if any(re.search(rf"\b{re.escape(term)}s?\b", all_text) for term in non_veg):
+            diet_status = "incompatible"
+            diet_notice = "This meal does not match your Vegetarian preference."
+
+    elif clean_diet == "pescatarian":
+        non_pesc = ["chicken", "beef", "pork", "mutton", "lamb", "duck", "meat", "poultry", "bacon"]
+        if any(re.search(rf"\b{re.escape(term)}s?\b", all_text) for term in non_pesc):
+            diet_status = "incompatible"
+            diet_notice = "This meal does not match your Pescatarian preference."
+
+    elif clean_diet == "halal":
+        pork_alcohol = ["pork", "bacon", "lard", "ham", "alcohol", "wine", "beer", "mirin", "sake", "rum", "char siew", "bak kut teh"]
+        if any(re.search(rf"\b{re.escape(term)}s?\b", all_text) for term in pork_alcohol):
+            diet_status = "incompatible"
+            diet_notice = "This meal does not match your Halal preference."
+        elif any(re.search(rf"\b{re.escape(term)}s?\b", all_text) for term in ["chicken", "beef", "mutton", "lamb", "meat", "duck"]):
+            diet_status = "caution"
+            diet_notice = "Halal suitability cannot be confirmed from image analysis alone."
+
+    allergy_notice = None
+    if clean_allergies:
+        allergen_map = {
+            "peanuts": ["peanut", "groundnut"],
+            "nuts": ["nut", "almond", "walnut", "cashew", "pecan", "hazelnut", "pistachio", "macadamia"],
+            "dairy": ["dairy", "milk", "cheese", "butter", "cream", "yogurt", "yoghurt", "whey"],
+            "shellfish": ["shellfish", "shrimp", "prawn", "crab", "lobster", "clam", "oyster", "mussel"],
+            "eggs": ["egg", "eggs"],
+            "soy": ["soy", "soya", "tofu", "edamame", "tempeh"],
+            "fish": ["fish", "salmon", "tuna", "cod", "tilapia", "mackerel", "anchovy"],
+            "gluten": ["gluten", "wheat", "barley", "rye"],
+        }
+        matched_allergens = []
+        for user_allergy in clean_allergies:
+            tokens = allergen_map.get(user_allergy, [user_allergy])
+            if any(re.search(rf"\b{re.escape(t)}s?\b", all_text) for t in tokens):
+                matched_allergens.append(user_allergy.title())
+
+        if matched_allergens:
+            allergy_notice = f"This meal may contain ingredients related to your listed allergy ({', '.join(matched_allergens)}). Image analysis cannot verify hidden ingredients or cross-contamination."
+
+    return {
+        "dietCompatibility": diet_status,
+        "dietNotice": diet_notice,
+        "allergyNotice": allergy_notice,
+    }
 
 
 def build_workout_recommendation_prompt(
@@ -425,7 +698,42 @@ async def analyze_food_image(
             raise ValueError("No JSON object found in AI response.")
         
         json_str = clean_text[start:end + 1]
-        return json.loads(json_str)
+        parsed_result = json.loads(json_str)
+        if isinstance(parsed_result, dict):
+            if "explanation" in parsed_result:
+                parsed_result["explanation"] = sanitize_recommendation_text(
+                    str(parsed_result.get("explanation", "")),
+                    diet_preference=diet_preference,
+                    allergies=allergies,
+                )
+            if "scoreExplanation" in parsed_result:
+                parsed_result["scoreExplanation"] = sanitize_recommendation_text(
+                    str(parsed_result.get("scoreExplanation", "")),
+                    diet_preference=diet_preference,
+                    allergies=allergies,
+                )
+            if "dietitianInsight" in parsed_result:
+                parsed_result["dietitianInsight"] = sanitize_recommendation_text(
+                    str(parsed_result.get("dietitianInsight", "")),
+                    diet_preference=diet_preference,
+                    allergies=allergies,
+                )
+            if "alternatives" in parsed_result:
+                parsed_result["alternatives"] = sanitize_food_alternatives(
+                    parsed_result.get("alternatives", []),
+                    diet_preference=diet_preference,
+                    allergies=allergies,
+                )
+            compat_info = evaluate_food_diet_compatibility(
+                foods=parsed_result.get("foods", []),
+                diet_preference=diet_preference,
+                allergies=allergies,
+            )
+            parsed_result["dietCompatibility"] = compat_info["dietCompatibility"]
+            parsed_result["dietNotice"] = compat_info["dietNotice"]
+            parsed_result["allergyNotice"] = compat_info["allergyNotice"]
+
+        return parsed_result
     except Exception as e:
         logger.error(f"Failed to parse Gemini response as JSON: {e}. Raw text: {raw_text}")
         raise HTTPException(

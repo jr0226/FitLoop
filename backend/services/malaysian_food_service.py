@@ -575,4 +575,7 @@ class MalaysianFoodService:
             "score": gemini_result.get("score", 75),
             "explanation": gemini_result.get("explanation", ""),
             "alternatives": gemini_result.get("alternatives", []),
+            "dietCompatibility": gemini_result.get("dietCompatibility", "compatible"),
+            "dietNotice": gemini_result.get("dietNotice"),
+            "allergyNotice": gemini_result.get("allergyNotice"),
         }

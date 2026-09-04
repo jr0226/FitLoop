@@ -27,11 +27,26 @@ class AppConfig {
   /// Request timeout in seconds (accommodates Render cold starts + Gemini multimodal processing)
   static const int requestTimeoutSeconds = 90;
 
+  /// Public URL for the FitLoop Privacy Policy (Google Play & Health Connect compliant)
+  static const String privacyPolicyUrl = String.fromEnvironment(
+    'PRIVACY_POLICY_URL',
+    defaultValue: 'https://diet-workout-app.web.app/privacy.html',
+  );
+
+  /// Public URL for the Account & Data Deletion request portal (Google Play compliant)
+  static const String dataDeletionUrl = String.fromEnvironment(
+    'DATA_DELETION_URL',
+    defaultValue: 'https://diet-workout-app.web.app/delete-account.html',
+  );
+
+  /// Official support contact email
+  static const String supportEmail = 'chaijierong8@gmail.com';
+
   /// Helper to log active non-sensitive environment configuration in debug mode
   static void logConfig() {
     if (kDebugMode) {
       debugPrint(
-        '🔧 [AppConfig] Active Backend URL: $apiBaseUrl (Env: $environment)',
+        '🔧 [AppConfig] Active Backend URL: $apiBaseUrl (Env: $environment, Privacy: $privacyPolicyUrl)',
       );
     }
   }

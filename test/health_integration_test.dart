@@ -131,6 +131,16 @@ void main() {
       expect(summary.errorMessage, isNull);
       expect(summary.fetchedAt, isNull);
     });
+
+    test('formattedSleep formats hours and minutes properly', () {
+      expect(const HealthSummary(status: HealthConnectStatus.connected, sleepHours: 0.0).formattedSleep, '--');
+      expect(const HealthSummary(status: HealthConnectStatus.connected, sleepHours: -1.0).formattedSleep, '--');
+      expect(const HealthSummary(status: HealthConnectStatus.connected, sleepHours: 7.5).formattedSleep, '7h 30m');
+      expect(const HealthSummary(status: HealthConnectStatus.connected, sleepHours: 6.25).formattedSleep, '6h 15m');
+      expect(const HealthSummary(status: HealthConnectStatus.connected, sleepHours: 0.75).formattedSleep, '45m');
+      expect(const HealthSummary(status: HealthConnectStatus.connected, sleepHours: 8.0).formattedSleep, '8h');
+      expect(const HealthSummary(status: HealthConnectStatus.connected, sleepHours: 7.6).formattedSleep, '7h 36m');
+    });
   });
 
   group('HealthWorkoutSession', () {

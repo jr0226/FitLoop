@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:url_launcher/url_launcher.dart';
+import '../../config/app_config.dart';
 import '../../services/auth_service.dart';
 import '../../widgets/change_password_dialog.dart';
 import '../login_page.dart';
@@ -868,30 +870,141 @@ class _SettingsTabState extends State<SettingsTab> {
     showDialog(
       context: context,
       builder: (c) => AlertDialog(
-        title: const Text("Delete Account?", style: TextStyle(color: Colors.red)),
-        content: const Text("This action is permanent and will wipe all your workout logs, diets, and routines. Are you absolutely sure?"),
+        title: const Text("Delete Account?", style: TextStyle(color: Colors.red, fontWeight: FontWeight.bold)),
+        content: const Text(
+          "This action is permanent and will permanently delete:\n\n"
+          "• All workout logs & custom routines\n"
+          "• All food & nutrition diary logs\n"
+          "• All body measurements & progress history\n"
+          "• Favorite exercises and achievements\n"
+          "• Your profile and authentication account\n\n"
+          "Are you absolutely sure?",
+        ),
         actions: [
           TextButton(onPressed: () => Navigator.pop(c), child: const Text("Cancel")),
           ElevatedButton(
-            onPressed: () async {
+            onPressed: () {
               Navigator.pop(c);
-              try {
-                await FirebaseFirestore.instance.collection('users').doc(currentUser!.uid).delete();
-                await currentUser!.delete();
-                if (mounted) {
+              _performAccountDeletion();
+            },
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.red, foregroundColor: Colors.white),
+            child: const Text("Delete Everything"),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _performAccountDeletion() async {
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => const PopScope(
+        canPop: false,
+        child: AlertDialog(
+          content: Row(
+            children: [
+              CircularProgressIndicator(color: Colors.red),
+              SizedBox(width: 20),
+              Expanded(child: Text("Permanently deleting your account & data...")),
+            ],
+          ),
+        ),
+      ),
+    );
+
+    try {
+      await AuthService.deleteAccountAndUserData();
+      if (!mounted) return;
+      Navigator.of(context, rootNavigator: true).pop(); // dismiss loading dialog
+      Navigator.of(context).pushAndRemoveUntil(
+        MaterialPageRoute(builder: (context) => const LoginPage()),
+        (route) => false,
+      );
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text("Account and personal data deleted successfully.")),
+      );
+    } on FirebaseAuthException catch (e) {
+      if (!mounted) return;
+      Navigator.of(context, rootNavigator: true).pop(); // dismiss loading dialog
+      if (e.code == 'requires-recent-login') {
+        showDialog(
+          context: context,
+          builder: (d) => AlertDialog(
+            title: const Text("Recent Sign-In Required"),
+            content: const Text(
+              "For security, account deletion requires recent authentication.\n\n"
+              "Please sign out, sign back in with your credentials, and retry deleting your account.",
+            ),
+            actions: [
+              TextButton(onPressed: () => Navigator.pop(d), child: const Text("Cancel")),
+              ElevatedButton(
+                onPressed: () async {
+                  Navigator.pop(d);
+                  await AuthService.signOut();
+                  if (!mounted) return;
                   Navigator.of(context).pushAndRemoveUntil(
                     MaterialPageRoute(builder: (context) => const LoginPage()),
                     (route) => false,
                   );
-                }
-              } catch (e) {
-                if (mounted) {
-                  ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Error: Requires recent login. Please re-authenticate.")));
-                }
-              }
-            },
-            style: ElevatedButton.styleFrom(backgroundColor: Colors.red, foregroundColor: Colors.white),
-            child: const Text("Delete Everything"),
+                },
+                child: const Text("Sign Out Now"),
+              ),
+            ],
+          ),
+        );
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text("Deletion failed: ${AuthService.getErrorMessage(e)}")),
+        );
+      }
+    } catch (e) {
+      if (!mounted) return;
+      Navigator.of(context, rootNavigator: true).pop(); // dismiss loading dialog
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text("Error deleting account: $e")),
+      );
+    }
+  }
+
+  Future<void> _openPrivacyPolicy() async {
+    final uri = Uri.parse(AppConfig.privacyPolicyUrl);
+    try {
+      final launched = await launchUrl(uri, mode: LaunchMode.externalApplication);
+      if (!launched && mounted) {
+        _showPrivacyPolicyFallbackDialog();
+      }
+    } catch (_) {
+      if (mounted) {
+        _showPrivacyPolicyFallbackDialog();
+      }
+    }
+  }
+
+  void _showPrivacyPolicyFallbackDialog() {
+    showDialog(
+      context: context,
+      builder: (c) => AlertDialog(
+        title: const Text("FitLoop Privacy Policy"),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              "FitLoop values your privacy. We do not sell personal data, do not serve ads, and process meal images in-memory solely for nutrition estimates.\n\n"
+              "You can view our complete public policy at:",
+            ),
+            const SizedBox(height: 12),
+            SelectableText(
+              AppConfig.privacyPolicyUrl,
+              style: const TextStyle(color: Colors.teal, fontWeight: FontWeight.bold),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(c),
+            child: const Text("Close"),
           ),
         ],
       ),
@@ -1095,7 +1208,7 @@ class _SettingsTabState extends State<SettingsTab> {
                       ListTile(
                         leading: _buildIconBox(Icons.restaurant_menu, Colors.green),
                         title: const Text("Diet Preference", style: TextStyle(fontWeight: FontWeight.w600)),
-                        subtitle: const Text("Meal recommendation filtering"),
+                        subtitle: const Text("Used to personalize AI food suggestions."),
                         trailing: DropdownButton<String>(
                           value: _dietPreference,
                           underline: const SizedBox(),
@@ -1116,7 +1229,13 @@ class _SettingsTabState extends State<SettingsTab> {
                       ListTile(
                         leading: _buildIconBox(Icons.warning_amber_rounded, Colors.redAccent),
                         title: const Text("Allergies & Intolerances", style: TextStyle(fontWeight: FontWeight.w600)),
-                        subtitle: Text(_allergies.isEmpty ? "None reported" : _allergies.join(", "), maxLines: 1, overflow: TextOverflow.ellipsis),
+                        subtitle: Text(
+                          _allergies.isEmpty
+                              ? "None reported (Avoids unsuitable AI recommendations)"
+                              : "Avoid: ${_allergies.join(', ')}",
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
                         trailing: const Icon(Icons.chevron_right),
                         onTap: () {
                           _showMultiSelectSheet(
@@ -1127,6 +1246,22 @@ class _SettingsTabState extends State<SettingsTab> {
                             onSave: _updateAllergies,
                           );
                         },
+                      ),
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(16, 6, 16, 12),
+                        child: Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Icon(Icons.info_outline, size: 14, color: Colors.grey.shade600),
+                            const SizedBox(width: 6),
+                            Expanded(
+                              child: Text(
+                                "AI suggestions personalize recommendations to avoid unsuitable foods, but cannot guarantee detection of hidden ingredients or cross-contamination.",
+                                style: TextStyle(fontSize: 11, color: Colors.grey.shade600, height: 1.3),
+                              ),
+                            ),
+                          ],
+                        ),
                       ),
                     ],
                   ),
@@ -1232,6 +1367,21 @@ class _SettingsTabState extends State<SettingsTab> {
                         ),
                       );
                     },
+                  ),
+                ),
+
+                const SizedBox(height: 20),
+
+                // LEGAL & PRIVACY
+                _buildSectionHeader("Legal & Privacy"),
+                Container(
+                  color: Colors.white,
+                  child: ListTile(
+                    leading: _buildIconBox(Icons.privacy_tip_outlined, Colors.teal),
+                    title: const Text("Privacy Policy", style: TextStyle(fontWeight: FontWeight.w600)),
+                    subtitle: const Text("Read our full data protection & privacy disclosures"),
+                    trailing: const Icon(Icons.open_in_new_rounded, size: 20, color: Colors.grey),
+                    onTap: _openPrivacyPolicy,
                   ),
                 ),
 

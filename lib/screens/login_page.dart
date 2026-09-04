@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:google_sign_in/google_sign_in.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:url_launcher/url_launcher.dart';
+import '../config/app_config.dart';
 
 // 👇 引入你要跳转的其他页面 (注意路径，如果它们都在 screens 文件夹下，直接写文件名即可)
 import 'main_dashboard.dart'; 
@@ -251,12 +253,71 @@ class _LoginPageState extends State<LoginPage> {
                         ),
                       ),
                       // 👈 === 结束 === 👉
+
+                      const SizedBox(height: 24),
+                      GestureDetector(
+                        onTap: _openPrivacyPolicy,
+                        child: Text(
+                          "By continuing, you agree to FitLoop's Privacy Policy",
+                          textAlign: TextAlign.center,
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: theme.colorScheme.onSurfaceVariant,
+                            decoration: TextDecoration.underline,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 8),
                     ],
                   ),
               ],
             ),
           ),
         ),
+      ),
+    );
+  }
+
+  Future<void> _openPrivacyPolicy() async {
+    final uri = Uri.parse(AppConfig.privacyPolicyUrl);
+    try {
+      final launched = await launchUrl(uri, mode: LaunchMode.externalApplication);
+      if (!launched && mounted) {
+        _showPrivacyPolicyFallbackDialog();
+      }
+    } catch (_) {
+      if (mounted) {
+        _showPrivacyPolicyFallbackDialog();
+      }
+    }
+  }
+
+  void _showPrivacyPolicyFallbackDialog() {
+    showDialog(
+      context: context,
+      builder: (c) => AlertDialog(
+        title: const Text("FitLoop Privacy Policy"),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              "FitLoop values your privacy. We never sell your personal data, never serve ads, and process food photos in-memory solely for nutrition estimates.\n\n"
+              "You can view our complete public policy at:",
+            ),
+            const SizedBox(height: 12),
+            SelectableText(
+              AppConfig.privacyPolicyUrl,
+              style: const TextStyle(color: Colors.teal, fontWeight: FontWeight.bold),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(c),
+            child: const Text("Close"),
+          ),
+        ],
       ),
     );
   }

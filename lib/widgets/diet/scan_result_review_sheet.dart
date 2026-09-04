@@ -238,6 +238,9 @@ class _ScanResultReviewSheetState extends State<ScanResultReviewSheet> {
       'mealScore': (widget.initialAnalysis['score'] as num?)?.toInt() ?? 0,
       'scoreExplanation': widget.initialAnalysis['explanation'] ?? '',
       'healthierAlternatives': List<String>.from(widget.initialAnalysis['alternatives'] ?? []),
+      'dietCompatibility': widget.initialAnalysis['dietCompatibility'] ?? 'compatible',
+      if (widget.initialAnalysis['dietNotice'] != null) 'dietNotice': widget.initialAnalysis['dietNotice'],
+      if (widget.initialAnalysis['allergyNotice'] != null) 'allergyNotice': widget.initialAnalysis['allergyNotice'],
       'source': 'ai_scan',
       'nutritionSource': 'ai_scan',
     };
@@ -478,6 +481,28 @@ class _ScanResultReviewSheetState extends State<ScanResultReviewSheet> {
                       ],
                     ),
                   ),
+
+                  // Diet Compatibility Notice Card
+                  if (widget.initialAnalysis['dietNotice'] != null &&
+                      widget.initialAnalysis['dietNotice'].toString().trim().isNotEmpty) ...[
+                    const SizedBox(height: 12),
+                    _buildDietNoticeCard(
+                      theme: theme,
+                      notice: widget.initialAnalysis['dietNotice'].toString(),
+                      isCaution: widget.initialAnalysis['dietCompatibility'] == 'caution',
+                    ),
+                  ],
+
+                  // Allergy Notice Card
+                  if (widget.initialAnalysis['allergyNotice'] != null &&
+                      widget.initialAnalysis['allergyNotice'].toString().trim().isNotEmpty) ...[
+                    const SizedBox(height: 12),
+                    _buildAllergyNoticeCard(
+                      theme: theme,
+                      notice: widget.initialAnalysis['allergyNotice'].toString(),
+                    ),
+                  ],
+
                   const SizedBox(height: 20),
 
                   // Detected Items Section
@@ -624,7 +649,109 @@ class _ScanResultReviewSheetState extends State<ScanResultReviewSheet> {
                       );
                     }),
 
-                  const SizedBox(height: 20),
+                  // Personalization & Dietitian Insight Preview
+                  if (widget.initialAnalysis['explanation'] != null &&
+                      widget.initialAnalysis['explanation'].toString().trim().isNotEmpty) ...[
+                    const SizedBox(height: 10),
+                    Container(
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: theme.brightness == Brightness.dark
+                            ? theme.colorScheme.surfaceContainerHighest.withValues(alpha: 0.5)
+                            : Colors.teal.shade50.withValues(alpha: 0.6),
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(
+                          color: theme.brightness == Brightness.dark
+                              ? theme.colorScheme.outlineVariant
+                              : Colors.teal.shade100,
+                        ),
+                      ),
+                      child: Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Icon(Icons.tips_and_updates_outlined, color: theme.colorScheme.primary, size: 18),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  "AI Nutrition Insight",
+                                  style: TextStyle(
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.bold,
+                                    color: theme.colorScheme.primary,
+                                  ),
+                                ),
+                                const SizedBox(height: 3),
+                                Text(
+                                  widget.initialAnalysis['explanation'].toString(),
+                                  style: TextStyle(
+                                    fontSize: 12,
+                                    color: theme.colorScheme.onSurface,
+                                    height: 1.35,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+
+                  // Healthier Alternatives Preview
+                  if (widget.initialAnalysis['alternatives'] is List &&
+                      (widget.initialAnalysis['alternatives'] as List).isNotEmpty) ...[
+                    const SizedBox(height: 14),
+                    Text(
+                      "💡 HEALTHIER ALTERNATIVES",
+                      style: TextStyle(
+                        fontSize: 11,
+                        fontWeight: FontWeight.bold,
+                        letterSpacing: 0.8,
+                        color: Colors.orangeAccent.shade700,
+                      ),
+                    ),
+                    const SizedBox(height: 6),
+                    ...(widget.initialAnalysis['alternatives'] as List).map(
+                      (alt) => Padding(
+                        padding: const EdgeInsets.only(bottom: 6),
+                        child: Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const Icon(Icons.check_circle_outline, color: Colors.orange, size: 16),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: Text(
+                                alt.toString(),
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  color: theme.colorScheme.onSurface,
+                                  height: 1.3,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ],
+
+                  // Safety disclaimer
+                  Padding(
+                    padding: const EdgeInsets.only(top: 8, bottom: 4),
+                    child: Text(
+                      "⚠️ AI suggestions may not identify hidden ingredients or cross-contamination.",
+                      style: TextStyle(
+                        fontSize: 11,
+                        color: theme.colorScheme.onSurfaceVariant.withValues(alpha: 0.8),
+                        fontStyle: FontStyle.italic,
+                      ),
+                    ),
+                  ),
+
+                  const SizedBox(height: 16),
                 ],
               ),
             ),
@@ -725,6 +852,111 @@ class _ScanResultReviewSheetState extends State<ScanResultReviewSheet> {
           ],
         ),
       ],
+    );
+  }
+
+  Widget _buildDietNoticeCard({
+    required ThemeData theme,
+    required String notice,
+    required bool isCaution,
+  }) {
+    final Color cardBg = isCaution
+        ? Colors.amber.shade50.withValues(alpha: theme.brightness == Brightness.dark ? 0.2 : 0.8)
+        : Colors.orange.shade50.withValues(alpha: theme.brightness == Brightness.dark ? 0.2 : 0.8);
+    final Color borderCol = isCaution ? Colors.amber.shade300 : Colors.orange.shade300;
+    final Color iconCol = isCaution ? Colors.amber.shade800 : Colors.orange.shade800;
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
+      decoration: BoxDecoration(
+        color: cardBg,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: borderCol),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(
+            isCaution ? Icons.help_outline_rounded : Icons.info_outline_rounded,
+            color: iconCol,
+            size: 20,
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  "Diet Preference Notice",
+                  style: TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.bold,
+                    color: isCaution ? Colors.amber.shade900 : Colors.orange.shade900,
+                  ),
+                ),
+                const SizedBox(height: 3),
+                Text(
+                  notice,
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: theme.colorScheme.onSurface,
+                    height: 1.35,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildAllergyNoticeCard({
+    required ThemeData theme,
+    required String notice,
+  }) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
+      decoration: BoxDecoration(
+        color: Colors.amber.shade50.withValues(alpha: theme.brightness == Brightness.dark ? 0.2 : 0.8),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: Colors.amber.shade300),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(
+            Icons.warning_amber_rounded,
+            color: Colors.amber.shade800,
+            size: 20,
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  "Allergy Notice",
+                  style: TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.bold,
+                    color: Colors.amber.shade900,
+                  ),
+                ),
+                const SizedBox(height: 3),
+                Text(
+                  notice,
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: theme.colorScheme.onSurface,
+                    height: 1.35,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
     );
   }
 }

@@ -144,6 +144,25 @@ class HealthSummary {
       distanceKm > 0 ||
       recentWorkouts.isNotEmpty;
 
+  /// Formats sleep duration to human-friendly hours and minutes (e.g. 7h 30m, 45m, 8h).
+  /// Avoids awkward decimal representations (e.g. 7.5h or 7.6h).
+  String get formattedSleep {
+    if (sleepHours <= 0) return '--';
+    final totalMinutes = (sleepHours * 60).round();
+    if (totalMinutes <= 0) return '--';
+
+    final h = totalMinutes ~/ 60;
+    final m = totalMinutes % 60;
+
+    if (h == 0) {
+      return '${m}m';
+    } else if (m == 0) {
+      return '${h}h';
+    } else {
+      return '${h}h ${m}m';
+    }
+  }
+
   HealthSummary copyWith({
     HealthConnectStatus? status,
     int? todaySteps,

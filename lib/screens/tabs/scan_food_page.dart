@@ -7,6 +7,7 @@ import '../../services/ai_service.dart';
 import '../../services/local_food_image_service.dart';
 import '../../services/scan_food_cache_service.dart';
 import '../../services/scan_draft_service.dart';
+import '../../services/diet_personalization_service.dart';
 import '../../widgets/diet/meal_detail_sheet.dart';
 import '../../widgets/diet/food_delete_dialog.dart';
 import '../../widgets/diet/scan_result_review_sheet.dart';
@@ -155,21 +156,43 @@ class _CameraTabState extends State<CameraTab>
     }
   }
 
-  void _resumeActiveDraft() {
+  Future<void> _resumeActiveDraft() async {
     if (_activeDraft == null) return;
     final draft = _activeDraft!;
+
+    String dietPreference = 'Standard';
+    List<String> allergies = [];
+    try {
+      final user = FirebaseAuth.instance.currentUser;
+      if (user != null) {
+        final userDoc = await FirebaseFirestore.instance.collection('users').doc(user.uid).get();
+        final userData = userDoc.data() ?? {};
+        dietPreference = userData['dietPreference'] ?? 'Standard';
+        if (userData['allergies'] is List) {
+          allergies = List<String>.from((userData['allergies'] as List).map((e) => e.toString()));
+        }
+      }
+    } catch (_) {}
+
+    final sanitizedAnalysis = DietPersonalizationService.sanitizeAndEvaluate(
+      draft.analysisData,
+      dietPreference: dietPreference,
+      allergies: allergies,
+    );
+
+    if (!mounted) return;
 
     ScanResultReviewSheet.show(
       context,
       imageBytes: draft.imageBytes,
-      initialAnalysis: draft.analysisData,
+      initialAnalysis: sanitizedAnalysis,
       initialMealName: draft.mealName,
       isCached: true,
       onEditsChanged: (edits) {
         ScanDraftService.instance.saveDraft(
           imageHash: draft.imageHash,
           imageBytes: draft.imageBytes,
-          analysisData: draft.analysisData,
+          analysisData: sanitizedAnalysis,
           mealName: edits['name']?.toString() ?? draft.mealName,
           userEdits: edits,
         );
@@ -185,7 +208,6 @@ class _CameraTabState extends State<CameraTab>
 
   Future<void> _reanalyze(Uint8List bytes, String imageHash) async {
     setState(() => _scanning = true);
-    await ScanFoodCacheService.instance.removeCachedAnalysis(imageHash);
 
     try {
       final user = FirebaseAuth.instance.currentUser!;
@@ -199,7 +221,13 @@ class _CameraTabState extends State<CameraTab>
         allergies = List<String>.from((userData['allergies'] as List).map((e) => e.toString()));
       }
 
-      final freshAnalysis = await AiService.analyzeFoodImage(
+      await ScanFoodCacheService.instance.removeCachedAnalysis(
+        imageHash,
+        dietPreference: dietPreference,
+        allergies: allergies,
+      );
+
+      var freshAnalysis = await AiService.analyzeFoodImage(
         imageBytes: bytes,
         userGoal: userGoal,
         calorieTarget: calorieTarget,
@@ -207,7 +235,19 @@ class _CameraTabState extends State<CameraTab>
         allergies: allergies,
       );
 
-      await ScanFoodCacheService.instance.saveAnalysis(imageHash, freshAnalysis);
+      // Defense-in-depth: client-side personalized evaluation & recommendation sanitization
+      freshAnalysis = DietPersonalizationService.sanitizeAndEvaluate(
+        freshAnalysis,
+        dietPreference: dietPreference,
+        allergies: allergies,
+      );
+
+      await ScanFoodCacheService.instance.saveAnalysis(
+        imageHash,
+        freshAnalysis,
+        dietPreference: dietPreference,
+        allergies: allergies,
+      );
       final defaultMealName = _deriveDefaultMealName(freshAnalysis);
       await ScanDraftService.instance.saveDraft(
         imageHash: imageHash,
@@ -268,25 +308,30 @@ class _CameraTabState extends State<CameraTab>
       final imageHash = ScanFoodCacheService.instance.computeImageHash(bytes);
       debugPrint("[ScanFood] Selected photo hash: $imageHash (${bytes.length} bytes)");
 
-      // 1. Check Exact-Image Persistent Cache
-      Map<String, dynamic>? analysisData = await ScanFoodCacheService.instance.getCachedAnalysis(imageHash);
+      // 1. Fetch current User Profile FIRST to establish dietary context before cache check
+      final user = FirebaseAuth.instance.currentUser!;
+      final userDoc = await FirebaseFirestore.instance
+          .collection('users')
+          .doc(user.uid)
+          .get();
+      final userData = userDoc.data() ?? {};
+      final String userGoal = userData['fitnessGoal'] ?? userData['goal'] ?? 'Maintenance';
+      final int? calorieTarget = (userData['calorieTarget'] ?? userData['dailyCaloriesTarget'] as num?)?.toInt();
+      final String dietPreference = userData['dietPreference'] ?? 'Standard';
+      List<String> allergies = [];
+      if (userData['allergies'] is List) {
+        allergies = List<String>.from((userData['allergies'] as List).map((e) => e.toString()));
+      }
+
+      // 2. Check Exact-Image + Personalization Persistent Cache
+      Map<String, dynamic>? analysisData = await ScanFoodCacheService.instance.getCachedAnalysis(
+        imageHash,
+        dietPreference: dietPreference,
+        allergies: allergies,
+      );
       final bool isCached = analysisData != null;
 
       if (!isCached) {
-        final user = FirebaseAuth.instance.currentUser!;
-        final userDoc = await FirebaseFirestore.instance
-            .collection('users')
-            .doc(user.uid)
-            .get();
-        final userData = userDoc.data() ?? {};
-        final String userGoal = userData['fitnessGoal'] ?? userData['goal'] ?? 'Maintenance';
-        final int? calorieTarget = (userData['calorieTarget'] ?? userData['dailyCaloriesTarget'] as num?)?.toInt();
-        final String dietPreference = userData['dietPreference'] ?? 'Standard';
-        List<String> allergies = [];
-        if (userData['allergies'] is List) {
-          allergies = List<String>.from((userData['allergies'] as List).map((e) => e.toString()));
-        }
-
         analysisData = await AiService.analyzeFoodImage(
           imageBytes: bytes,
           userGoal: userGoal,
@@ -294,12 +339,24 @@ class _CameraTabState extends State<CameraTab>
           dietPreference: dietPreference,
           allergies: allergies,
         );
-
-        // Store into persistent exact-image cache
-        await ScanFoodCacheService.instance.saveAnalysis(imageHash, analysisData);
       }
 
-      // 2. Auto-save local draft BEFORE user confirms Save Meal
+      // 3. Defense-in-depth: client-side personalized evaluation & recommendation sanitization
+      analysisData = DietPersonalizationService.sanitizeAndEvaluate(
+        analysisData,
+        dietPreference: dietPreference,
+        allergies: allergies,
+      );
+
+      // Store into persistent exact-image + personalized cache
+      await ScanFoodCacheService.instance.saveAnalysis(
+        imageHash,
+        analysisData,
+        dietPreference: dietPreference,
+        allergies: allergies,
+      );
+
+      // 4. Auto-save local draft BEFORE user confirms Save Meal
       final String defaultMealName = _deriveDefaultMealName(analysisData);
       await ScanDraftService.instance.saveDraft(
         imageHash: imageHash,

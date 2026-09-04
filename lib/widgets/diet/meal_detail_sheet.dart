@@ -228,6 +228,104 @@ class MealDetailSheet extends StatelessWidget {
 
                   const SizedBox(height: 18),
 
+                  // Diet Preference Notice Card
+                  if (meal['dietNotice'] != null &&
+                      meal['dietNotice'].toString().trim().isNotEmpty) ...[
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
+                      decoration: BoxDecoration(
+                        color: (meal['dietCompatibility'] == 'caution' ? Colors.amber.shade50 : Colors.orange.shade50)
+                            .withValues(alpha: theme.brightness == Brightness.dark ? 0.2 : 0.8),
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(
+                          color: meal['dietCompatibility'] == 'caution'
+                              ? Colors.amber.shade300
+                              : Colors.orange.shade300,
+                        ),
+                      ),
+                      child: Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Icon(
+                            meal['dietCompatibility'] == 'caution'
+                                ? Icons.help_outline_rounded
+                                : Icons.info_outline_rounded,
+                            color: meal['dietCompatibility'] == 'caution'
+                                ? Colors.amber.shade800
+                                : Colors.orange.shade800,
+                            size: 20,
+                          ),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  "Diet Preference Notice",
+                                  style: TextStyle(
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.bold,
+                                    color: meal['dietCompatibility'] == 'caution'
+                                        ? Colors.amber.shade900
+                                        : Colors.orange.shade900,
+                                  ),
+                                ),
+                                const SizedBox(height: 3),
+                                Text(
+                                  meal['dietNotice'].toString(),
+                                  style: TextStyle(fontSize: 12, color: theme.colorScheme.onSurface, height: 1.35),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 14),
+                  ],
+
+                  // Allergy Notice Card
+                  if (meal['allergyNotice'] != null &&
+                      meal['allergyNotice'].toString().trim().isNotEmpty) ...[
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
+                      decoration: BoxDecoration(
+                        color: Colors.amber.shade50
+                            .withValues(alpha: theme.brightness == Brightness.dark ? 0.2 : 0.8),
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(color: Colors.amber.shade300),
+                      ),
+                      child: Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Icon(Icons.warning_amber_rounded, color: Colors.amber.shade800, size: 20),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  "Allergy Notice",
+                                  style: TextStyle(
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.bold,
+                                    color: Colors.amber.shade900,
+                                  ),
+                                ),
+                                const SizedBox(height: 3),
+                                Text(
+                                  meal['allergyNotice'].toString(),
+                                  style: TextStyle(fontSize: 12, color: theme.colorScheme.onSurface, height: 1.35),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 14),
+                  ],
+
                   // 2. AI INSIGHTS & EXPLANATION (Only when available)
                   if (explanation.isNotEmpty) ...[
                     Container(
@@ -332,6 +430,17 @@ class MealDetailSheet extends StatelessWidget {
                               ),
                             ),
                           ],
+                        ),
+                      ),
+                    ),
+                    Padding(
+                      padding: const EdgeInsets.only(top: 4, bottom: 4),
+                      child: Text(
+                        "⚠️ AI suggestions may not identify hidden ingredients or cross-contamination.",
+                        style: TextStyle(
+                          fontSize: 11,
+                          color: theme.colorScheme.onSurfaceVariant.withValues(alpha: 0.8),
+                          fontStyle: FontStyle.italic,
                         ),
                       ),
                     ),

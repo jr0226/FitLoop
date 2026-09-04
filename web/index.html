@@ -1,38 +1,462 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-  <!--
-    If you are serving your web app in a path other than the root, change the
-    href value below to reflect the base path you are serving from.
-
-    The path provided below has to start and end with a slash "/" in order for
-    it to work correctly.
-
-    For more details:
-    * https://developer.mozilla.org/en-US/docs/Web/HTML/Element/base
-
-    This is a placeholder for base href that will be replaced by the value of
-    the `--base-href` argument provided to `flutter build`.
-  -->
-  <base href="$FLUTTER_BASE_HREF">
-
   <meta charset="UTF-8">
-  <meta content="IE=Edge" http-equiv="X-UA-Compatible">
-  <meta name="description" content="A new Flutter project.">
-
-  <!-- iOS meta tags & icons -->
-  <meta name="mobile-web-app-capable" content="yes">
-  <meta name="apple-mobile-web-app-status-bar-style" content="black">
-  <meta name="apple-mobile-web-app-title" content="flutter_application_1">
-  <link rel="apple-touch-icon" href="icons/Icon-192.png">
-
-  <!-- Favicon -->
-  <link rel="icon" type="image/png" href="favicon.png"/>
-
-  <title>flutter_application_1</title>
-  <link rel="manifest" href="manifest.json">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="FitLoop - Your fitness, nutrition, and daily progress in one place. Track workouts, scan meals with AI, monitor nutrition, and connect Health Connect data.">
+  <title>FitLoop - Fitness, Workout & AI Nutrition Tracking</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --primary: #0f766e;
+      --primary-light: #14b8a6;
+      --primary-subtle: #f0fdfa;
+      --primary-dark: #115e59;
+      --accent: #f97316;
+      --text-main: #0f172a;
+      --text-muted: #475569;
+      --bg: #f8fafc;
+      --card-bg: #ffffff;
+      --border: #e2e8f0;
+      --radius: 16px;
+      --shadow: 0 4px 20px -2px rgba(0, 0, 0, 0.05);
+      --shadow-hover: 0 10px 25px -3px rgba(15, 118, 110, 0.12);
+    }
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+    body {
+      font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background-color: var(--bg);
+      color: var(--text-main);
+      line-height: 1.6;
+    }
+    header {
+      background: #ffffff;
+      border-bottom: 1px solid var(--border);
+      position: sticky;
+      top: 0;
+      z-index: 100;
+    }
+    .header-container {
+      max-width: 1100px;
+      margin: 0 auto;
+      padding: 16px 24px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      text-decoration: none;
+      color: var(--text-main);
+    }
+    .brand-logo {
+      width: 40px;
+      height: 40px;
+      border-radius: 10px;
+      background: var(--primary);
+      color: #ffffff;
+      font-weight: 800;
+      font-size: 18px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .brand-name {
+      font-size: 20px;
+      font-weight: 800;
+      letter-spacing: -0.5px;
+    }
+    nav {
+      display: flex;
+      align-items: center;
+      gap: 20px;
+    }
+    nav a {
+      text-decoration: none;
+      color: var(--text-muted);
+      font-weight: 600;
+      font-size: 14px;
+      transition: color 0.2s;
+    }
+    nav a:hover {
+      color: var(--primary);
+    }
+    .hero {
+      max-width: 1100px;
+      margin: 0 auto;
+      padding: 72px 24px 56px;
+      text-align: center;
+    }
+    .hero-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      background: var(--primary-subtle);
+      color: var(--primary);
+      border: 1px solid #ccfbf1;
+      padding: 6px 16px;
+      border-radius: 999px;
+      font-size: 13px;
+      font-weight: 700;
+      margin-bottom: 24px;
+    }
+    .hero h1 {
+      font-size: 48px;
+      font-weight: 800;
+      line-height: 1.15;
+      letter-spacing: -1px;
+      margin-bottom: 20px;
+      color: var(--text-main);
+    }
+    .hero h1 span {
+      color: var(--primary);
+    }
+    .hero p {
+      max-width: 720px;
+      margin: 0 auto 32px;
+      font-size: 18px;
+      color: var(--text-muted);
+      line-height: 1.6;
+    }
+    .hero-cta {
+      display: flex;
+      gap: 16px;
+      justify-content: center;
+      flex-wrap: wrap;
+    }
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      padding: 12px 24px;
+      border-radius: 12px;
+      font-weight: 700;
+      font-size: 15px;
+      text-decoration: none;
+      transition: all 0.2s ease;
+    }
+    .btn-primary {
+      background: var(--primary);
+      color: #ffffff;
+      box-shadow: 0 4px 14px rgba(15, 118, 110, 0.25);
+    }
+    .btn-primary:hover {
+      background: var(--primary-dark);
+      transform: translateY(-1px);
+    }
+    .btn-secondary {
+      background: #ffffff;
+      color: var(--text-main);
+      border: 1px solid var(--border);
+    }
+    .btn-secondary:hover {
+      background: #f1f5f9;
+    }
+    .section {
+      max-width: 1100px;
+      margin: 0 auto;
+      padding: 48px 24px 72px;
+    }
+    .section-header {
+      text-align: center;
+      margin-bottom: 48px;
+    }
+    .section-header h2 {
+      font-size: 32px;
+      font-weight: 800;
+      letter-spacing: -0.5px;
+      color: var(--text-main);
+      margin-bottom: 12px;
+    }
+    .section-header p {
+      color: var(--text-muted);
+      font-size: 16px;
+      max-width: 600px;
+      margin: 0 auto;
+    }
+    .features-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+      gap: 24px;
+    }
+    .feature-card {
+      background: var(--card-bg);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 32px;
+      box-shadow: var(--shadow);
+      transition: all 0.2s ease;
+    }
+    .feature-card:hover {
+      transform: translateY(-3px);
+      box-shadow: var(--shadow-hover);
+      border-color: #99f6e4;
+    }
+    .feature-icon {
+      width: 48px;
+      height: 48px;
+      border-radius: 12px;
+      background: var(--primary-subtle);
+      color: var(--primary);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 24px;
+      margin-bottom: 20px;
+    }
+    .feature-card h3 {
+      font-size: 19px;
+      font-weight: 700;
+      margin-bottom: 12px;
+      color: var(--text-main);
+    }
+    .feature-card p {
+      color: var(--text-muted);
+      font-size: 14px;
+      line-height: 1.6;
+      margin-bottom: 16px;
+    }
+    .feature-list {
+      list-style: none;
+    }
+    .feature-list li {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 13px;
+      color: var(--text-main);
+      font-weight: 600;
+      margin-bottom: 8px;
+    }
+    .feature-list li::before {
+      content: "✓";
+      color: var(--primary);
+      font-weight: 800;
+    }
+    footer {
+      background: #0f172a;
+      color: #94a3b8;
+      padding: 56px 24px 32px;
+    }
+    .footer-container {
+      max-width: 1100px;
+      margin: 0 auto;
+    }
+    .footer-top {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      flex-wrap: wrap;
+      gap: 32px;
+      padding-bottom: 40px;
+      border-bottom: 1px solid #1e293b;
+    }
+    .footer-brand h3 {
+      color: #ffffff;
+      font-size: 20px;
+      font-weight: 800;
+      margin-bottom: 8px;
+    }
+    .footer-brand p {
+      max-width: 360px;
+      font-size: 14px;
+      line-height: 1.6;
+    }
+    .footer-links h4 {
+      color: #ffffff;
+      font-size: 14px;
+      font-weight: 700;
+      margin-bottom: 16px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+    .footer-links ul {
+      list-style: none;
+    }
+    .footer-links li {
+      margin-bottom: 10px;
+    }
+    .footer-links a {
+      color: #94a3b8;
+      text-decoration: none;
+      font-size: 14px;
+      transition: color 0.2s;
+    }
+    .footer-links a:hover {
+      color: #ffffff;
+    }
+    .disclaimer-box {
+      background: #1e293b;
+      border-left: 3px solid #f59e0b;
+      padding: 16px 20px;
+      border-radius: 8px;
+      margin: 32px 0;
+      font-size: 13px;
+      line-height: 1.6;
+      color: #cbd5e1;
+    }
+    .disclaimer-box strong {
+      color: #fbbf24;
+    }
+    .footer-bottom {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 16px;
+      font-size: 13px;
+    }
+    @media (max-width: 768px) {
+      .hero h1 {
+        font-size: 34px;
+      }
+      .hero p {
+        font-size: 16px;
+      }
+      .section-header h2 {
+        font-size: 26px;
+      }
+    }
+  </style>
 </head>
 <body>
-  <script src="flutter_bootstrap.js" async></script>
+  <header>
+    <div class="header-container">
+      <a href="/" class="brand">
+        <div class="brand-logo">FL</div>
+        <span class="brand-name">FitLoop</span>
+      </a>
+      <nav>
+        <a href="#features">Features</a>
+        <a href="/privacy.html">Privacy</a>
+        <a href="/delete-account.html">Account Deletion</a>
+        <a href="mailto:chaijierong8@gmail.com">Contact</a>
+      </nav>
+    </div>
+  </header>
+
+  <main>
+    <section class="hero">
+      <div class="hero-badge">⚡ All-in-One Fitness &amp; Nutrition Companion</div>
+      <h1>Your Fitness, Nutrition, and Daily Progress <span>in One Place</span></h1>
+      <p>Track workouts, scan meals with AI, monitor nutrition, and connect Health Connect data from one simple fitness companion.</p>
+      <div class="hero-cta">
+        <a href="#features" class="btn btn-primary">Explore Features</a>
+        <a href="/privacy.html" class="btn btn-secondary">Privacy &amp; Security</a>
+      </div>
+    </section>
+
+    <section id="features" class="section">
+      <div class="section-header">
+        <h2>Built for Your Daily Routine</h2>
+        <p>Everything you need to plan workouts, log meals accurately, and track long-term progress with confidence.</p>
+      </div>
+
+      <div class="features-grid">
+        <!-- 1. Personalized Workouts -->
+        <div class="feature-card">
+          <div class="feature-icon">🏋️</div>
+          <h3>Personalized Workouts</h3>
+          <p>Plan and log your strength and conditioning sessions with custom routines adapted to your equipment and experience level.</p>
+          <ul class="feature-list">
+            <li>AI-assisted routine generation</li>
+            <li>Custom routine builder with multi-set logging</li>
+            <li>Exercise library with form guidance &amp; targets</li>
+          </ul>
+        </div>
+
+        <!-- 2. AI Food Scanner -->
+        <div class="feature-card">
+          <div class="feature-icon">📷</div>
+          <h3>AI Food Scanner</h3>
+          <p>Take a quick photo of your meal to recognize dishes and receive estimated caloric breakdown and macronutrients.</p>
+          <ul class="feature-list">
+            <li>Instant meal photo recognition</li>
+            <li>Estimated calories, protein, carbs &amp; fats</li>
+            <li>Dietary preference-aware compatibility notes</li>
+          </ul>
+        </div>
+
+        <!-- 3. Nutrition Tracking -->
+        <div class="feature-card">
+          <div class="feature-icon">🥗</div>
+          <h3>Nutrition Tracking</h3>
+          <p>Maintain your daily nutrition diary with Malaysian and international food databases tailored to your calorie goals.</p>
+          <ul class="feature-list">
+            <li>Curated Malaysian food database</li>
+            <li>Daily caloric &amp; macronutrient targets</li>
+            <li>Breakfast, lunch, dinner &amp; snack logging</li>
+          </ul>
+        </div>
+
+        <!-- 4. Health Connect -->
+        <div class="feature-card">
+          <div class="feature-icon">⌚</div>
+          <h3>Health Connect Sync</h3>
+          <p>Seamless read-only integration with Android Health Connect to view your smartwatch metrics on a single dashboard.</p>
+          <ul class="feature-list">
+            <li>Daily steps and distance</li>
+            <li>Sleep duration and night stages</li>
+            <li>Active calories burned, heart rate &amp; workouts</li>
+          </ul>
+        </div>
+
+        <!-- 5. Progress Tracking -->
+        <div class="feature-card">
+          <div class="feature-icon">📈</div>
+          <h3>Progress &amp; Reports</h3>
+          <p>Visualize your fitness consistency over time with interactive trend graphs and comprehensive health exports.</p>
+          <ul class="feature-list">
+            <li>Workout volume and streak consistency</li>
+            <li>Body weight and measurement checkpoints</li>
+            <li>Exportable PDF Health &amp; Fitness summaries</li>
+          </ul>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer>
+    <div class="footer-container">
+      <div class="footer-top">
+        <div class="footer-brand">
+          <h3>FitLoop</h3>
+          <p>A smart fitness and nutrition companion helping you stay consistent with your workout targets and meal tracking.</p>
+        </div>
+        <div class="footer-links">
+          <h4>Compliance &amp; Legal</h4>
+          <ul>
+            <li><a href="/privacy.html">Privacy Policy</a></li>
+            <li><a href="/delete-account.html">Account &amp; Data Deletion</a></li>
+          </ul>
+        </div>
+        <div class="footer-links">
+          <h4>Support &amp; Contact</h4>
+          <ul>
+            <li><a href="mailto:chaijierong8@gmail.com">chaijierong8@gmail.com</a></li>
+            <li><a href="https://diet-workout-app.web.app">diet-workout-app.web.app</a></li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="disclaimer-box">
+        <strong>Wellness Disclaimer:</strong> FitLoop is intended for general fitness and wellness purposes. AI-generated nutrition estimates and fitness suggestions are informational only and are not medical advice.
+      </div>
+
+      <div class="footer-bottom">
+        <span>&copy; 2026 FitLoop. All rights reserved.</span>
+        <span>Version 1.0.8 | Google Play &amp; Health Connect Compliant</span>
+      </div>
+    </div>
+  </footer>
 </body>
 </html>

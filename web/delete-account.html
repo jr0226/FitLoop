@@ -1,0 +1,259 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Account & Data Deletion - FitLoop</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --primary: #0f766e;
+      --primary-light: #14b8a6;
+      --primary-subtle: #f0fdfa;
+      --danger: #dc2626;
+      --danger-subtle: #fef2f2;
+      --text-main: #0f172a;
+      --text-muted: #475569;
+      --bg: #f8fafc;
+      --card-bg: #ffffff;
+      --border: #e2e8f0;
+      --radius: 16px;
+    }
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+    body {
+      font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background-color: var(--bg);
+      color: var(--text-main);
+      line-height: 1.7;
+      padding: 32px 20px;
+    }
+    .container {
+      max-width: 860px;
+      margin: 0 auto;
+      background: var(--card-bg);
+      border-radius: var(--radius);
+      border: 1px solid var(--border);
+      box-shadow: 0 4px 20px -2px rgba(0, 0, 0, 0.05);
+      padding: 48px;
+    }
+    @media (max-width: 640px) {
+      .container {
+        padding: 24px;
+      }
+    }
+    .brand-header {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      margin-bottom: 24px;
+      padding-bottom: 24px;
+      border-bottom: 1px solid var(--border);
+    }
+    .brand-logo {
+      width: 48px;
+      height: 48px;
+      border-radius: 12px;
+      background: var(--danger);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: #fff;
+      font-weight: 800;
+      font-size: 22px;
+    }
+    .brand-title h1 {
+      font-size: 28px;
+      font-weight: 800;
+      color: var(--text-main);
+    }
+    .brand-title p {
+      font-size: 14px;
+      color: var(--text-muted);
+    }
+    .badge {
+      display: inline-block;
+      padding: 6px 12px;
+      border-radius: 999px;
+      font-size: 13px;
+      font-weight: 600;
+      background: var(--danger-subtle);
+      color: var(--danger);
+      margin-bottom: 24px;
+    }
+    h2 {
+      font-size: 20px;
+      font-weight: 700;
+      color: var(--text-main);
+      margin-top: 36px;
+      margin-bottom: 12px;
+    }
+    h3 {
+      font-size: 16px;
+      font-weight: 600;
+      margin-top: 18px;
+      margin-bottom: 8px;
+      color: var(--text-main);
+    }
+    p {
+      margin-bottom: 14px;
+      color: var(--text-muted);
+    }
+    ul, ol {
+      margin-left: 20px;
+      margin-bottom: 16px;
+      color: var(--text-muted);
+    }
+    li {
+      margin-bottom: 8px;
+    }
+    .danger-box {
+      background: var(--danger-subtle);
+      border-left: 4px solid var(--danger);
+      padding: 16px 20px;
+      border-radius: 8px;
+      margin: 20px 0;
+    }
+    .danger-box p {
+      margin: 0;
+      color: #991b1b;
+      font-weight: 500;
+    }
+    .step-card {
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 20px;
+      margin: 16px 0;
+    }
+    .step-card h4 {
+      font-size: 16px;
+      font-weight: 700;
+      color: var(--primary);
+      margin-bottom: 8px;
+    }
+    .form-box {
+      background: #f1f5f9;
+      border-radius: 12px;
+      padding: 24px;
+      margin-top: 24px;
+    }
+    .form-box h3 {
+      margin-top: 0;
+    }
+    .btn {
+      display: inline-block;
+      background: var(--primary);
+      color: #ffffff;
+      padding: 12px 24px;
+      border-radius: 8px;
+      font-weight: 600;
+      font-size: 14px;
+      text-decoration: none;
+      margin-top: 12px;
+    }
+    .btn:hover {
+      background: var(--primary-light);
+      text-decoration: none;
+    }
+    .nav-links {
+      margin-top: 40px;
+      padding-top: 24px;
+      border-top: 1px solid var(--border);
+      display: flex;
+      justify-content: space-between;
+      flex-wrap: wrap;
+      gap: 12px;
+      font-size: 14px;
+    }
+    a {
+      color: var(--primary);
+      text-decoration: none;
+      font-weight: 600;
+    }
+    a:hover {
+      text-decoration: underline;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="brand-header">
+      <div class="brand-logo">&times;</div>
+      <div class="brand-title">
+        <h1>FitLoop</h1>
+        <p>Account &amp; Data Deletion Request</p>
+      </div>
+    </div>
+
+    <span class="badge">Google Play Account Deletion Policy Compliant</span>
+
+    <div class="danger-box">
+      <p><strong>Warning:</strong> Deleting your account is permanent. Once completed, your profile, workout logs, nutritional history, personal routines, and progress data cannot be recovered.</p>
+    </div>
+
+    <h2>How to Delete Your FitLoop Account &amp; Data</h2>
+    <p>FitLoop provides two convenient paths for deleting your account and associated personal information:</p>
+
+    <div class="step-card">
+      <h4>Option 1: Delete Directly Inside the App (Instant)</h4>
+      <p>If you have the FitLoop app installed on your Android device:</p>
+      <ol>
+        <li>Open <strong>FitLoop</strong> and sign in to your account.</li>
+        <li>Tap on <strong>Settings</strong> (gear icon in the bottom navigation).</li>
+        <li>Scroll down to the <strong>Danger Zone</strong> section at the bottom.</li>
+        <li>Tap <strong>Delete Account</strong>.</li>
+        <li>Review the confirmation prompt and tap <strong>"Delete Everything"</strong>.</li>
+      </ol>
+      <p><em>Your account and all associated cloud data will be wiped immediately, and you will be returned to the login screen.</em></p>
+    </div>
+
+    <div class="step-card">
+      <h4>Option 2: Submit a Web/Email Request (If App Is Uninstalled)</h4>
+      <p>If you have uninstalled the app or cannot access your device, you may submit a deletion request directly to our privacy operations team:</p>
+      <div class="form-box">
+        <h3>Email Deletion Request</h3>
+        <p>Send an email from the address associated with your FitLoop account to:</p>
+        <p><strong>To:</strong> <a href="mailto:chaijierong8@gmail.com?subject=Account%20Deletion%20Request%20-%20FitLoop">chaijierong8@gmail.com</a></p>
+        <p><strong>Subject:</strong> Account Deletion Request - FitLoop</p>
+        <p><strong>Body:</strong> Please include:</p>
+        <ul>
+          <li>Your registered email address</li>
+          <li>A brief statement requesting permanent deletion of your FitLoop account and all associated data.</li>
+        </ul>
+        <a class="btn" href="mailto:chaijierong8@gmail.com?subject=Account%20Deletion%20Request%20-%20FitLoop">Draft Deletion Email &rarr;</a>
+      </div>
+    </div>
+
+    <h2>What Data Is Permanently Deleted?</h2>
+    <p>Upon receiving and confirming your deletion request, the following records are permanently wiped from our systems:</p>
+    <ul>
+      <li><strong>Firebase Authentication Record:</strong> Email address, login credentials, and user UID.</li>
+      <li><strong>User Profile:</strong> Name, age, biological sex, height, weight, fitness goals, and dietary preferences (`users/{uid}`).</li>
+      <li><strong>Food &amp; Nutrition Logs:</strong> All meal diary entries and nutrient breakdowns (`users/{uid}/food_logs`).</li>
+      <li><strong>Workout Logs &amp; Routines:</strong> All completed workout sessions, sets, repetitions, and custom workout routines (`users/{uid}/workout_logs` &amp; `users/{uid}/routines`).</li>
+      <li><strong>Favorite Exercises:</strong> All bookmarked exercise items (`users/{uid}/favorite_exercises`).</li>
+      <li><strong>Body Measurements:</strong> Historical weight and circumference checkpoints (`users/{uid}/measurements`).</li>
+      <li><strong>Achievements:</strong> Earned badges and milestone progress (`users/{uid}/achievements`).</li>
+      <li><strong>Local Cache:</strong> Local cached food thumbnail images and drafts on your device (`food_images/`).</li>
+    </ul>
+
+    <h2>Data Retention &amp; Processing Timelines</h2>
+    <ul>
+      <li><strong>In-App Deletion:</strong> Executed immediately (0 days retention). Cloud Firestore data and Firebase Authentication accounts are purged in real time.</li>
+      <li><strong>Email Requests:</strong> Processed and verified within <strong>7 business days</strong> of receipt. Once identity verification is confirmed, all associated records are permanently erased.</li>
+      <li><strong>Retention Exceptions:</strong> None. FitLoop does not retain any fitness, dietary, or health metrics following account deletion. Any temporary server access logs (IP addresses for fraud prevention) are automatically rotated and purged after 30 days.</li>
+    </ul>
+
+    <div class="nav-links">
+      <a href="privacy.html">&larr; Back to Privacy Policy</a>
+      <span>&copy; 2026 FitLoop. All rights reserved.</span>
+    </div>
+  </div>
+</body>
+</html>

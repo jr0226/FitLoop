@@ -828,7 +828,7 @@ class _HomeTabState extends State<HomeTab> {
                 Icons.bedtime_rounded,
                 "Sleep",
                 isConnected && _healthSummary.sleepHours > 0
-                    ? '${_healthSummary.sleepHours}h'
+                    ? _healthSummary.formattedSleep
                     : '--',
                 Colors.purple,
               ),

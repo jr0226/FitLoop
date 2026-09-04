@@ -34,9 +34,8 @@ android {
         applicationId = "com.utarfyp.meowfit"
         minSdk = 26
         targetSdk = flutter.targetSdkVersion
-        versionCode = 9
-        // MUST be a string (in quotes)
-        versionName = "1.0.6" 
+        versionCode = flutter.versionCode
+        versionName = flutter.versionName
     }
 
     signingConfigs {
