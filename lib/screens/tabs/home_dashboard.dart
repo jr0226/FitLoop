@@ -8,6 +8,7 @@ import '../../models/health_models.dart';
 import '../../services/measurement_service.dart';
 import '../../services/health_integration_service.dart';
 import '../../services/daily_workout_summary_service.dart';
+import '../../services/unified_activity_summary_service.dart';
 
 // ==========================================
 // HOME DASHBOARD - DAILY FITNESS OVERVIEW
@@ -21,22 +22,49 @@ class HomeTab extends StatefulWidget {
   State<HomeTab> createState() => _HomeTabState();
 }
 
-class _HomeTabState extends State<HomeTab> {
+class _HomeTabState extends State<HomeTab> with WidgetsBindingObserver {
   int _waterMl = 0;
 
   /// Health summary — typed result from HealthIntegrationService.
   HealthSummary _healthSummary = HealthSummary.loading;
+  List<ExternalWorkoutSession> _externalWorkoutsToday = [];
+  bool _isSyncingHealth = false;
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _fetchHealthData();
   }
 
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      _fetchHealthData();
+    }
+  }
+
   Future<void> _fetchHealthData() async {
-    final summary = await HealthIntegrationService.instance.fetchDailySummary();
-    if (mounted) {
-      setState(() => _healthSummary = summary);
+    if (_isSyncingHealth) return;
+    if (mounted) setState(() => _isSyncingHealth = true);
+    try {
+      final summary = await HealthIntegrationService.instance.fetchDailySummary();
+      final externalWorkouts = await HealthIntegrationService.instance.getExternalWorkoutsForDate(DateTime.now());
+      if (mounted) {
+        setState(() {
+          _healthSummary = summary;
+          _externalWorkoutsToday = externalWorkouts;
+          _isSyncingHealth = false;
+        });
+      }
+    } catch (_) {
+      if (mounted) setState(() => _isSyncingHealth = false);
     }
   }
 
@@ -151,23 +179,31 @@ class _HomeTabState extends State<HomeTab> {
                       .where('timestamp', isLessThan: endOfDay)
                       .snapshots(),
                   builder: (context, workoutSnapshot) {
-                    int burnedCalories = 0;
+                    final List<Map<String, dynamic>> allLogs = [];
                     int weeklyWorkoutsCount = 0;
                     int weeklyBurnedCalories = 0;
 
                     if (workoutSnapshot.hasData && workoutSnapshot.data!.docs.isNotEmpty) {
                       weeklyWorkoutsCount = workoutSnapshot.data!.docs.length;
                       for (var doc in workoutSnapshot.data!.docs) {
-                        final data = doc.data();
-                        final int cals = DailyWorkoutSummaryService.parseWorkoutCalories(data);
-                        weeklyBurnedCalories += cals;
-
-                        final bool isToday = DailyWorkoutSummaryService.isWorkoutOnDay(data, now);
-                        if (isToday) {
-                          burnedCalories += cals;
-                        }
+                        final data = Map<String, dynamic>.from(doc.data());
+                        data['id'] = doc.id;
+                        allLogs.add(data);
+                        weeklyBurnedCalories += DailyWorkoutSummaryService.parseWorkoutCalories(data);
                       }
                     }
+
+                    // Unified workout summary (FitLoop + Health Connect external workouts)
+                    final unifiedToday = UnifiedActivitySummaryService.calculateDailySummary(
+                      fitLoopLogs: allLogs,
+                      externalWorkouts: _externalWorkoutsToday,
+                      targetDate: now,
+                    );
+
+                    final int burnedCalories = UnifiedActivitySummaryService.calculateEffectiveBurnedCalories(
+                      activeCaloriesFromHealth: _healthSummary.activeCaloriesKcal,
+                      unifiedSummary: unifiedToday,
+                    );
 
                     // Calories Math
                     final int netCalories = eatenCalories - burnedCalories;
@@ -228,7 +264,10 @@ class _HomeTabState extends State<HomeTab> {
                               const SizedBox(height: 16),
 
                               // E. ACTIVITY & HEALTH SUMMARY
-                              _buildActivityAndHealthSection(streak: streak),
+                              _buildActivityAndHealthSection(
+                                streak: streak,
+                                unifiedToday: unifiedToday,
+                              ),
 
                               const SizedBox(height: 16),
 
@@ -731,7 +770,10 @@ class _HomeTabState extends State<HomeTab> {
   }
 
   // --- E. ACTIVITY & HEALTH SUMMARY ---
-  Widget _buildActivityAndHealthSection({required int streak}) {
+  Widget _buildActivityAndHealthSection({
+    required int streak,
+    UnifiedDailyActivitySummary? unifiedToday,
+  }) {
     final status = _healthSummary.status;
     final bool isConnected = status.isHealthy;
     final theme = Theme.of(context);
@@ -782,7 +824,26 @@ class _HomeTabState extends State<HomeTab> {
         Row(
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
-            Text("Activity & Health", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: theme.colorScheme.onSurface)),
+            Row(
+              children: [
+                Text("Activity & Health", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: theme.colorScheme.onSurface)),
+                const SizedBox(width: 6),
+                InkWell(
+                  onTap: _isSyncingHealth ? null : _fetchHealthData,
+                  borderRadius: BorderRadius.circular(16),
+                  child: Padding(
+                    padding: const EdgeInsets.all(4.0),
+                    child: _isSyncingHealth
+                        ? const SizedBox(
+                            width: 14,
+                            height: 14,
+                            child: CircularProgressIndicator(strokeWidth: 2, color: Colors.teal),
+                          )
+                        : Icon(Icons.sync_rounded, size: 16, color: theme.colorScheme.primary),
+                  ),
+                ),
+              ],
+            ),
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
               decoration: BoxDecoration(
@@ -871,6 +932,74 @@ class _HomeTabState extends State<HomeTab> {
                   ),
                 ),
             ],
+          ),
+        ],
+
+        if (unifiedToday != null && unifiedToday.totalWorkoutCount > 0) ...[
+          const SizedBox(height: 8),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+            decoration: BoxDecoration(
+              color: theme.cardColor,
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: theme.colorScheme.outlineVariant),
+            ),
+            child: Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(6),
+                  decoration: BoxDecoration(
+                    color: Colors.teal.shade50,
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Icon(Icons.fitness_center_rounded, size: 16, color: Colors.teal.shade700),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        "${unifiedToday.totalWorkoutCount} Workout${unifiedToday.totalWorkoutCount > 1 ? 's' : ''} Today",
+                        style: TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.bold,
+                          color: theme.colorScheme.onSurface,
+                        ),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        "${unifiedToday.totalExerciseCalories} kcal burned • Unified activity",
+                        style: TextStyle(
+                          fontSize: 11,
+                          color: theme.colorScheme.onSurfaceVariant,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                if (unifiedToday.externalWorkouts.isNotEmpty)
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                    decoration: BoxDecoration(
+                      color: Colors.green.shade50,
+                      borderRadius: BorderRadius.circular(6),
+                      border: Border.all(color: Colors.green.shade200),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(Icons.watch_rounded, size: 10, color: Colors.green.shade800),
+                        const SizedBox(width: 3),
+                        Text(
+                          "Synced",
+                          style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Colors.green.shade800),
+                        ),
+                      ],
+                    ),
+                  ),
+              ],
+            ),
           ),
         ],
 

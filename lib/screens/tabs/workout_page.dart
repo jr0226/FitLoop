@@ -3,6 +3,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import '../../services/ai_service.dart';
 import '../../services/exercise_service.dart';
+import '../../services/workout_category_validator.dart';
 
 import '../active_workout_page.dart';
 
@@ -146,7 +147,13 @@ class _WorkoutTabState extends State<WorkoutTab> {
 
       final batch = FirebaseFirestore.instance.batch();
       
-      for (var routine in generatedRoutines) {
+      for (var rawRoutine in generatedRoutines) {
+        final routine = WorkoutCategoryValidator.validateAndRepairRoutine(
+          rawRoutine,
+          requestedCategory: _selectedCategory,
+          availableEquipment: equipment,
+          fitnessLevel: effectiveDifficulty,
+        );
         final docRef = FirebaseFirestore.instance.collection('users').doc(uid).collection('routines').doc();
         final String routineName = routine['name'] ?? routine['routineName'] ?? 'Workout Routine';
         final String routineLevel = routine['fitnessLevel'] ?? routine['level'] ?? _difficulty;
@@ -157,7 +164,7 @@ class _WorkoutTabState extends State<WorkoutTab> {
         final List<Map<String, dynamic>> normalizedExercises = rawExercises.map((e) {
           if (e is Map) {
             final String exName = e['name'] ?? e['exerciseName'] ?? 'Exercise';
-            final String target = e['target'] ?? e['category'] ?? 'Full Body';
+            final String target = e['target'] ?? e['category'] ?? routineCategory;
             final String equipment = e['equipment'] ?? 'General';
             final String setsReps = e['sets']?.toString() ?? '3 sets x 10 reps';
             final String instructions = e['instructions'] ?? e['desc'] ?? '';

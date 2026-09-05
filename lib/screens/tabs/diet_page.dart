@@ -167,9 +167,9 @@ class _DietPageState extends State<DietPage> {
           double targetCarbs = (dailyTarget * carbPercent) / 4;
           double targetFat = (dailyTarget * fatPercent) / 9;
           // ------------------------------------------
-          // Stream workout logs for the selected day and calculate exercise calories
+          // Stream unified workout logs (FitLoop + Health Connect) for the selected day
           return StreamBuilder<int>(
-            stream: DailyWorkoutSummaryService.streamDailyWorkoutCalories(
+            stream: DailyWorkoutSummaryService.streamDailyUnifiedExerciseCalories(
               uid,
               _selectedDate,
             ),

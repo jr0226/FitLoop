@@ -99,9 +99,12 @@ class HealthIntegrationService {
         }
       }
 
-      // Step 4: Fetch all data types in parallel
+      // Step 4: Log raw Health Connect records for debug audit
+      await debugLogRawHealthConnectRecords();
+
+      // Step 5: Fetch all data types in parallel
       final now = DateTime.now();
-      final startOfDay = DateTime(now.year, now.month, now.day);
+      final startOfDay = DateTime(now.year, now.month, now.day, 0, 0, 0);
 
       // Sleep window: previous day 6 PM → now
       // Covers midnight-crossing sessions (most common real-world sleep)
@@ -154,6 +157,135 @@ class HealthIntegrationService {
     }
   }
 
+  /// Logs raw Health Connect records for TODAY.
+  /// Meets requirement 1:
+  /// - HealthDataType.STEPS
+  /// - HealthDataType.ACTIVE_ENERGY_BURNED
+  /// - HealthDataType.WORKOUT
+  /// - HealthDataType.DISTANCE_DELTA
+  /// - HealthDataType.HEART_RATE
+  Future<void> debugLogRawHealthConnectRecords() async {
+    final now = DateTime.now();
+    final startOfDay = DateTime(now.year, now.month, now.day, 0, 0, 0);
+
+    debugPrint('==================================================');
+    debugPrint('FITLOOP HEALTH CONNECT REAL DEVICE RAW READ DEBUG');
+    debugPrint('Local Time: $now (Timezone: ${now.timeZoneName}, Offset: ${now.timeZoneOffset})');
+    debugPrint('Local Query Window: $startOfDay -> $now');
+    debugPrint('UTC Query Window: ${startOfDay.toUtc()} -> ${now.toUtc()}');
+    debugPrint('==================================================');
+
+    // 1. STEPS
+    try {
+      final stepPoints = await _health.getHealthDataFromTypes(
+        types: [HealthDataType.STEPS],
+        startTime: startOfDay,
+        endTime: now,
+      );
+      final aggregatedSteps = await _health.getTotalStepsInInterval(startOfDay, now);
+      double rawStepSum = 0;
+      for (final p in stepPoints) {
+        final v = p.value;
+        final numVal = v is NumericHealthValue ? v.numericValue.toDouble() : 0.0;
+        rawStepSum += numVal;
+        debugPrint('[RAW STEP] val=$numVal, start=${p.dateFrom}, end=${p.dateTo}, src=${p.sourceName}, id=${p.sourceId}');
+      }
+      final dedupedSteps = _health.removeDuplicates(stepPoints);
+      double dedupedStepSum = 0;
+      for (final p in dedupedSteps) {
+        final v = p.value;
+        if (v is NumericHealthValue) dedupedStepSum += v.numericValue.toDouble();
+      }
+      debugPrint('[STEPS SUMMARY] Raw Points: ${stepPoints.length}, Raw Sum: $rawStepSum, Deduped Sum: $dedupedStepSum, Native Aggregated: $aggregatedSteps');
+    } catch (e, st) {
+      debugPrint('[STEPS ERROR] $e\n$st');
+    }
+
+    // 2. ACTIVE ENERGY BURNED
+    try {
+      final activeEnergyPoints = await _health.getHealthDataFromTypes(
+        types: [HealthDataType.ACTIVE_ENERGY_BURNED],
+        startTime: startOfDay,
+        endTime: now,
+      );
+      double rawActiveEnergySum = 0;
+      for (final p in activeEnergyPoints) {
+        final v = p.value;
+        final numVal = v is NumericHealthValue ? v.numericValue.toDouble() : 0.0;
+        rawActiveEnergySum += numVal;
+        debugPrint('[RAW ACTIVE ENERGY] val=$numVal kcal, start=${p.dateFrom}, end=${p.dateTo}, src=${p.sourceName}, id=${p.sourceId}');
+      }
+      final dedupedActiveEnergy = _health.removeDuplicates(activeEnergyPoints);
+      double dedupedActiveEnergySum = 0;
+      for (final p in dedupedActiveEnergy) {
+        final v = p.value;
+        if (v is NumericHealthValue) dedupedActiveEnergySum += v.numericValue.toDouble();
+      }
+      debugPrint('[ACTIVE ENERGY SUMMARY] Raw Points: ${activeEnergyPoints.length}, Raw Sum: $rawActiveEnergySum kcal, Deduped Sum: $dedupedActiveEnergySum kcal');
+    } catch (e, st) {
+      debugPrint('[ACTIVE ENERGY ERROR] $e\n$st');
+    }
+
+    // 3. WORKOUT / EXERCISE SESSION
+    try {
+      final workoutPoints = await _health.getHealthDataFromTypes(
+        types: [HealthDataType.WORKOUT],
+        startTime: startOfDay,
+        endTime: now,
+      );
+      debugPrint('[WORKOUT SUMMARY] Raw Workout Points: ${workoutPoints.length}');
+      for (final p in workoutPoints) {
+        final v = p.value;
+        if (v is WorkoutHealthValue) {
+          final dur = p.dateTo.difference(p.dateFrom).inMinutes;
+          debugPrint('[RAW WORKOUT] type=${v.workoutActivityType.name}, dur=$dur min, energy=${v.totalEnergyBurned} kcal, dist=${v.totalDistance} m, steps=${v.totalSteps}, start=${p.dateFrom}, end=${p.dateTo}, src=${p.sourceName}, id=${p.sourceId}');
+        } else {
+          debugPrint('[RAW WORKOUT] Non-workout value: $v, start=${p.dateFrom}, end=${p.dateTo}, src=${p.sourceName}');
+        }
+      }
+    } catch (e, st) {
+      debugPrint('[WORKOUT ERROR] $e\n$st');
+    }
+
+    // 4. DISTANCE DELTA
+    try {
+      final distancePoints = await _health.getHealthDataFromTypes(
+        types: [HealthDataType.DISTANCE_DELTA],
+        startTime: startOfDay,
+        endTime: now,
+      );
+      double rawDistMeters = 0;
+      for (final p in distancePoints) {
+        final v = p.value;
+        final numVal = v is NumericHealthValue ? v.numericValue.toDouble() : 0.0;
+        rawDistMeters += numVal;
+        debugPrint('[RAW DISTANCE] val=$numVal m, start=${p.dateFrom}, end=${p.dateTo}, src=${p.sourceName}');
+      }
+      debugPrint('[DISTANCE SUMMARY] Raw Points: ${distancePoints.length}, Total: ${(rawDistMeters / 1000).toStringAsFixed(2)} km');
+    } catch (e, st) {
+      debugPrint('[DISTANCE ERROR] $e\n$st');
+    }
+
+    // 5. HEART RATE
+    try {
+      final hrPoints = await _health.getHealthDataFromTypes(
+        types: [HealthDataType.HEART_RATE],
+        startTime: startOfDay,
+        endTime: now,
+      );
+      debugPrint('[HEART RATE SUMMARY] Raw Points: ${hrPoints.length}');
+      for (final p in hrPoints) {
+        final v = p.value;
+        final numVal = v is NumericHealthValue ? v.numericValue.toDouble() : 0.0;
+        debugPrint('[RAW HEART RATE] bpm=$numVal, time=${p.dateFrom}, src=${p.sourceName}');
+      }
+    } catch (e, st) {
+      debugPrint('[HEART RATE ERROR] $e\n$st');
+    }
+
+    debugPrint('==================================================');
+  }
+
   /// Request permissions only — useful for the Settings "Connect" button.
   /// Returns true if all permissions were granted.
   Future<bool> requestPermissions() async {
@@ -197,8 +329,23 @@ class HealthIntegrationService {
   Future<int> _fetchSteps(DateTime start, DateTime end) async {
     try {
       final int? steps = await _health.getTotalStepsInInterval(start, end);
-      return steps ?? 0;
-    } catch (_) {
+      if (steps != null && steps > 0) return steps;
+
+      // Fallback: query raw step points and sum deduplicated
+      final points = await _health.getHealthDataFromTypes(
+        types: [HealthDataType.STEPS],
+        startTime: start,
+        endTime: end,
+      );
+      final deduped = _health.removeDuplicates(points);
+      int sum = 0;
+      for (final p in deduped) {
+        final v = p.value;
+        if (v is NumericHealthValue) sum += v.numericValue.toInt();
+      }
+      return sum;
+    } catch (e, st) {
+      debugPrint('[FitLoop HealthConnect] _fetchSteps error: $e\n$st');
       return 0;
     }
   }
@@ -220,7 +367,8 @@ class HealthIntegrationService {
         }
       }
       return double.parse(total.toStringAsFixed(1));
-    } catch (_) {
+    } catch (e, st) {
+      debugPrint('[FitLoop HealthConnect] _fetchActiveCalories error: $e\n$st');
       return 0.0;
     }
   }
@@ -240,7 +388,8 @@ class HealthIntegrationService {
         return double.parse(v.numericValue.toDouble().toStringAsFixed(0));
       }
       return null;
-    } catch (_) {
+    } catch (e, st) {
+      debugPrint('[FitLoop HealthConnect] _fetchHeartRate error: $e\n$st');
       return null;
     }
   }
@@ -265,7 +414,8 @@ class HealthIntegrationService {
       }
       if (totalMinutes <= 0) return 0.0;
       return double.parse((totalMinutes / 60).toStringAsFixed(1));
-    } catch (_) {
+    } catch (e, st) {
+      debugPrint('[FitLoop HealthConnect] _fetchSleepHours error: $e\n$st');
       return 0.0;
     }
   }
@@ -286,7 +436,8 @@ class HealthIntegrationService {
         }
       }
       return double.parse((totalMeters / 1000).toStringAsFixed(2));
-    } catch (_) {
+    } catch (e, st) {
+      debugPrint('[FitLoop HealthConnect] _fetchDistanceKm error: $e\n$st');
       return 0.0;
     }
   }
@@ -301,13 +452,33 @@ class HealthIntegrationService {
         startTime: start,
         endTime: end,
       );
+      final activeEnergyPoints = await _health.getHealthDataFromTypes(
+        types: [HealthDataType.ACTIVE_ENERGY_BURNED],
+        startTime: start,
+        endTime: end,
+      ).catchError((e) {
+        debugPrint('[FitLoop HealthConnect] _fetchWorkoutSessions active energy error: $e');
+        return <HealthDataPoint>[];
+      });
+
       final sessions = <HealthWorkoutSession>[];
       for (final p in points) {
         final v = p.value;
         double? calories;
         double? distance;
         if (v is WorkoutHealthValue) {
-          calories = v.totalEnergyBurned?.toDouble();
+          if (v.totalEnergyBurned != null && v.totalEnergyBurned! > 0) {
+            calories = v.totalEnergyBurned?.toDouble();
+          } else if (activeEnergyPoints.isNotEmpty) {
+            double overlapping = 0.0;
+            for (final ep in activeEnergyPoints) {
+              if (!ep.dateTo.isBefore(p.dateFrom) && !ep.dateFrom.isAfter(p.dateTo)) {
+                final ev = ep.value;
+                if (ev is NumericHealthValue) overlapping += ev.numericValue.toDouble();
+              }
+            }
+            if (overlapping > 0) calories = overlapping;
+          }
           distance = v.totalDistance != null ? v.totalDistance! / 1000 : null;
           sessions.add(HealthWorkoutSession(
             activityType: v.workoutActivityType.name
@@ -328,9 +499,200 @@ class HealthIntegrationService {
       // Sort most recent first
       sessions.sort((a, b) => b.startTime.compareTo(a.startTime));
       return sessions;
-    } catch (_) {
+    } catch (e, st) {
+      debugPrint('[FitLoop HealthConnect] _fetchWorkoutSessions error: $e\n$st');
       return [];
     }
+  }
+
+  // ─── Unified External Workout Ingestion ───────────────────────────────────
+
+  /// For unit testing: allows injecting external workouts without a physical Health Connect instance.
+  @visibleForTesting
+  List<ExternalWorkoutSession>? mockWorkoutsForTesting;
+
+  /// Fetches all external workout sessions recorded for the given [date].
+  /// Start of day: 00:00:00.000, End of day: current time (if today) or 23:59:59.999.
+  /// Reads WORKOUT data points, extracts source metadata, attributes calories
+  /// (preferring direct workout calories, falling back to overlapping ACTIVE_ENERGY_BURNED),
+  /// and normalizes workout categories.
+  Future<List<ExternalWorkoutSession>> getExternalWorkoutsForDate(DateTime date) async {
+    if (mockWorkoutsForTesting != null) {
+      return List<ExternalWorkoutSession>.from(mockWorkoutsForTesting!);
+    }
+
+    final now = DateTime.now();
+    final isToday = date.year == now.year && date.month == now.month && date.day == now.day;
+    final start = DateTime(date.year, date.month, date.day, 0, 0, 0);
+    final end = isToday ? now : DateTime(date.year, date.month, date.day, 23, 59, 59, 999);
+
+    try {
+      final bool available = await _checkAvailability();
+      if (!available) {
+        debugPrint('[FitLoop HealthConnect] getExternalWorkoutsForDate: Health Connect not available');
+        return [];
+      }
+
+      List<HealthDataPoint> workoutPoints = [];
+      try {
+        workoutPoints = await _health.getHealthDataFromTypes(
+          types: [HealthDataType.WORKOUT],
+          startTime: start,
+          endTime: end,
+        );
+        debugPrint('[FitLoop HealthConnect] getExternalWorkoutsForDate: got ${workoutPoints.length} WORKOUT points');
+      } catch (e, st) {
+        debugPrint('[FitLoop HealthConnect] getExternalWorkoutsForDate WORKOUT error: $e\n$st');
+      }
+
+      List<HealthDataPoint> activeEnergyPoints = [];
+      try {
+        activeEnergyPoints = await _health.getHealthDataFromTypes(
+          types: [HealthDataType.ACTIVE_ENERGY_BURNED],
+          startTime: start,
+          endTime: end,
+        );
+        debugPrint('[FitLoop HealthConnect] getExternalWorkoutsForDate: got ${activeEnergyPoints.length} ACTIVE_ENERGY_BURNED points');
+      } catch (e, st) {
+        debugPrint('[FitLoop HealthConnect] getExternalWorkoutsForDate ACTIVE_ENERGY error: $e\n$st');
+      }
+
+      return parseExternalWorkouts(
+        workoutPoints: workoutPoints,
+        activeEnergyPoints: activeEnergyPoints,
+      );
+    } catch (e, st) {
+      debugPrint('[FitLoop HealthConnect] getExternalWorkoutsForDate error: $e\n$st');
+      return [];
+    }
+  }
+
+  /// Fetches external workout sessions recorded between [start] and [end].
+  Future<List<ExternalWorkoutSession>> getExternalWorkoutsForDateRange(
+    DateTime start,
+    DateTime end,
+  ) async {
+    if (mockWorkoutsForTesting != null) {
+      return List<ExternalWorkoutSession>.from(mockWorkoutsForTesting!);
+    }
+
+    try {
+      final bool available = await _checkAvailability();
+      if (!available) return [];
+
+      List<HealthDataPoint> workoutPoints = [];
+      try {
+        workoutPoints = await _health.getHealthDataFromTypes(
+          types: [HealthDataType.WORKOUT],
+          startTime: start,
+          endTime: end,
+        );
+      } catch (e, st) {
+        debugPrint('[FitLoop HealthConnect] getExternalWorkoutsForDateRange WORKOUT error: $e\n$st');
+      }
+
+      List<HealthDataPoint> activeEnergyPoints = [];
+      try {
+        activeEnergyPoints = await _health.getHealthDataFromTypes(
+          types: [HealthDataType.ACTIVE_ENERGY_BURNED],
+          startTime: start,
+          endTime: end,
+        );
+      } catch (e, st) {
+        debugPrint('[FitLoop HealthConnect] getExternalWorkoutsForDateRange ACTIVE_ENERGY error: $e\n$st');
+      }
+
+      return parseExternalWorkouts(
+        workoutPoints: workoutPoints,
+        activeEnergyPoints: activeEnergyPoints,
+      );
+    } catch (e, st) {
+      debugPrint('[FitLoop HealthConnect] getExternalWorkoutsForDateRange error: $e\n$st');
+      return [];
+    }
+  }
+
+  /// Pure parser helper separating Health Connect point extraction from platform calls.
+  /// Deduplicates duplicate representations and attributes active energy bounded by workout window.
+  static List<ExternalWorkoutSession> parseExternalWorkouts({
+    required List<HealthDataPoint> workoutPoints,
+    List<HealthDataPoint> activeEnergyPoints = const [],
+  }) {
+    final List<ExternalWorkoutSession> sessions = [];
+    final Set<String> seenIdentifiers = {};
+
+    for (final p in workoutPoints) {
+      final v = p.value;
+      if (v is! WorkoutHealthValue) continue;
+
+      final workoutType = v.workoutActivityType.name
+          .replaceAll('_', ' ')
+          .toLowerCase()
+          .split(' ')
+          .map((w) => w.isNotEmpty ? w[0].toUpperCase() + w.substring(1) : w)
+          .join(' ');
+
+      final normalizedCat = HealthCategoryNormalizer.normalize(workoutType);
+
+      final startTime = p.dateFrom;
+      final endTime = p.dateTo;
+      final durationMins = endTime.difference(startTime).inMinutes;
+      final duration = durationMins > 0 ? durationMins : 1;
+
+      // Unique identifier deduplication across duplicate points
+      final dedupeKey = '${p.uuid}_${startTime.millisecondsSinceEpoch}_${endTime.millisecondsSinceEpoch}_$workoutType';
+      if (seenIdentifiers.contains(dedupeKey)) continue;
+      seenIdentifiers.add(dedupeKey);
+
+      // Calorie attribution:
+      // 1. Prefer direct workout calories if available and > 0
+      int? calories;
+      final directCal = v.totalEnergyBurned;
+      if (directCal != null && directCal > 0) {
+        calories = directCal.round();
+      } else if (activeEnergyPoints.isNotEmpty) {
+        // 2. Fallback: attribute overlapping ACTIVE_ENERGY_BURNED records
+        // Record overlaps if: energy.dateTo > workout.startTime AND energy.dateFrom < workout.endTime
+        double overlappingEnergy = 0.0;
+        for (final ep in activeEnergyPoints) {
+          if (ep.dateTo.isAfter(startTime) && ep.dateFrom.isBefore(endTime)) {
+            final ev = ep.value;
+            if (ev is NumericHealthValue) {
+              overlappingEnergy += ev.numericValue.toDouble();
+            }
+          }
+        }
+        if (overlappingEnergy > 0) {
+          calories = overlappingEnergy.round();
+        }
+      }
+
+      // Distance in kilometers
+      final double? distanceKm = (v.totalDistance != null && v.totalDistance! > 0)
+          ? (v.totalDistance! / 1000.0)
+          : null;
+
+      // Source metadata preserved for display
+      final String? sourceName = p.sourceName.isNotEmpty ? p.sourceName : null;
+      final String? sourceId = p.sourceId.isNotEmpty ? p.sourceId : null;
+
+      sessions.add(ExternalWorkoutSession(
+        id: p.uuid.isNotEmpty ? p.uuid : '${startTime.millisecondsSinceEpoch}_$workoutType',
+        workoutType: workoutType,
+        normalizedCategory: normalizedCat,
+        startTime: startTime,
+        endTime: endTime,
+        durationMinutes: duration,
+        caloriesKcal: calories,
+        distanceKm: distanceKm,
+        sourceName: sourceName,
+        sourceId: sourceId,
+      ));
+    }
+
+    // Sort most recent first
+    sessions.sort((a, b) => b.startTime.compareTo(a.startTime));
+    return sessions;
   }
 
   // ─── Utility helpers for Settings UI ─────────────────────────────────────

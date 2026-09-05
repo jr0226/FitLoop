@@ -1,6 +1,10 @@
 import 'dart:io';
 import 'dart:typed_data';
 import 'package:flutter/material.dart';
+import '../../services/ai_service.dart';
+import '../../services/diet_personalization_service.dart';
+import '../../services/scan_food_cache_service.dart';
+import '../../services/local_food_image_service.dart';
 
 class ScanResultReviewSheet extends StatefulWidget {
   final File? imageFile;
@@ -11,6 +15,11 @@ class ScanResultReviewSheet extends StatefulWidget {
   final VoidCallback? onReanalyze;
   final Function(Map<String, dynamic> currentEdits)? onEditsChanged;
   final Future<void> Function(Map<String, dynamic> finalMealData) onSave;
+  final String? imageHash;
+  final String userGoal;
+  final int? calorieTarget;
+  final String dietPreference;
+  final List<String> allergies;
 
   const ScanResultReviewSheet({
     super.key,
@@ -22,7 +31,23 @@ class ScanResultReviewSheet extends StatefulWidget {
     this.onReanalyze,
     this.onEditsChanged,
     required this.onSave,
+    this.imageHash,
+    this.userGoal = 'Maintenance',
+    this.calorieTarget,
+    this.dietPreference = 'Standard',
+    this.allergies = const [],
+    this.recalculateFn,
   });
+
+  final Future<Map<String, dynamic>> Function({
+    required Uint8List imageBytes,
+    required String correctedFoodName,
+    double? previousServingGrams,
+    String userGoal,
+    int? calorieTarget,
+    String dietPreference,
+    List<String> allergies,
+  })? recalculateFn;
 
   static Future<void> show(
     BuildContext context, {
@@ -34,6 +59,20 @@ class ScanResultReviewSheet extends StatefulWidget {
     VoidCallback? onReanalyze,
     Function(Map<String, dynamic> currentEdits)? onEditsChanged,
     required Future<void> Function(Map<String, dynamic> finalMealData) onSave,
+    String? imageHash,
+    String userGoal = 'Maintenance',
+    int? calorieTarget,
+    String dietPreference = 'Standard',
+    List<String> allergies = const [],
+    Future<Map<String, dynamic>> Function({
+      required Uint8List imageBytes,
+      required String correctedFoodName,
+      double? previousServingGrams,
+      String userGoal,
+      int? calorieTarget,
+      String dietPreference,
+      List<String> allergies,
+    })? recalculateFn,
   }) {
     return showModalBottomSheet(
       context: context,
@@ -48,6 +87,12 @@ class ScanResultReviewSheet extends StatefulWidget {
         onReanalyze: onReanalyze,
         onEditsChanged: onEditsChanged,
         onSave: onSave,
+        imageHash: imageHash,
+        userGoal: userGoal,
+        calorieTarget: calorieTarget,
+        dietPreference: dietPreference,
+        allergies: allergies,
+        recalculateFn: recalculateFn,
       ),
     );
   }
@@ -61,6 +106,15 @@ class _ScanResultReviewSheetState extends State<ScanResultReviewSheet> {
   late List<Map<String, dynamic>> _items;
   bool _isSaving = false;
 
+  // Human-in-the-loop correction state
+  bool _isRecalculating = false;
+  int _recalculationCount = 0;
+  static const int _maxRecalculations = 2;
+  bool _wasUserCorrected = false;
+  String? _originalDetectedFoodName;
+  String? _correctedFoodName;
+  late Map<String, dynamic> _currentAnalysis;
+
   int _totalCalories = 0;
   int _totalProtein = 0;
   int _totalCarbs = 0;
@@ -69,8 +123,9 @@ class _ScanResultReviewSheetState extends State<ScanResultReviewSheet> {
   @override
   void initState() {
     super.initState();
+    _currentAnalysis = Map<String, dynamic>.from(widget.initialAnalysis);
 
-    final rawFoods = widget.initialAnalysis['foods'] as List? ?? [];
+    final rawFoods = _currentAnalysis['foods'] as List? ?? [];
     _items = rawFoods.map((f) {
       if (f is Map) {
         final cals = (f['calories'] as num?)?.toInt() ?? 0;
@@ -94,6 +149,7 @@ class _ScanResultReviewSheetState extends State<ScanResultReviewSheet> {
           'servingGrams': grams,
           'nutritionSource': f['nutritionSource'] ?? f['nutrition_source'],
           'matchedFoodName': f['matchedFoodName'] ?? f['matched_food_name'],
+          'isCorrected': false,
         };
       }
       return <String, dynamic>{
@@ -109,10 +165,11 @@ class _ScanResultReviewSheetState extends State<ScanResultReviewSheet> {
         'carbs': 0,
         'fat': 0,
         'servingGrams': 100.0,
+        'isCorrected': false,
       };
     }).toList();
 
-    String initialName = widget.initialMealName ?? widget.initialAnalysis['name']?.toString() ?? '';
+    String initialName = widget.initialMealName ?? _currentAnalysis['name']?.toString() ?? '';
     if (initialName.isEmpty) {
       if (_items.length == 1) {
         initialName = _items[0]['name'];
@@ -176,39 +233,474 @@ class _ScanResultReviewSheetState extends State<ScanResultReviewSheet> {
   }
 
   Future<void> _editItemName(int index) async {
-    final controller = TextEditingController(text: _items[index]['name']);
-    final newName = await showDialog<String>(
+    final currentItem = _items[index];
+    final originalName = currentItem['name'].toString();
+    final controller = TextEditingController(text: originalName);
+
+    final result = await showDialog<Map<String, dynamic>>(
       context: context,
-      builder: (ctx) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title: const Text("Rename Item", style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
-        content: TextField(
-          controller: controller,
-          autofocus: true,
-          decoration: const InputDecoration(
-            hintText: "Enter food name",
-            border: OutlineInputBorder(),
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: const Text("Cancel"),
-          ),
-          ElevatedButton(
-            onPressed: () => Navigator.pop(ctx, controller.text.trim()),
-            style: ElevatedButton.styleFrom(backgroundColor: Colors.teal, foregroundColor: Colors.white),
-            child: const Text("Update"),
-          ),
-        ],
-      ),
+      builder: (ctx) {
+        final remainingRecalculations = _maxRecalculations - _recalculationCount;
+        final canRecalculateWithAi = remainingRecalculations > 0;
+
+        return StatefulBuilder(
+          builder: (dialogCtx, setDialogState) {
+            final theme = Theme.of(dialogCtx);
+            return Dialog(
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+              insetPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 24),
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 420),
+                child: SingleChildScrollView(
+                  padding: const EdgeInsets.fromLTRB(20, 20, 20, 16),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          const Icon(Icons.edit_note_rounded, color: Colors.teal),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Text(
+                              "Correct Food Item",
+                              style: TextStyle(
+                                fontSize: 17,
+                                fontWeight: FontWeight.bold,
+                                color: theme.colorScheme.onSurface,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 10),
+                      Text(
+                        "Enter the actual food name. You can recalculate nutrition with AI using the original scan image, or keep the name edit only.",
+                        style: TextStyle(fontSize: 12, color: theme.colorScheme.onSurfaceVariant, height: 1.35),
+                      ),
+                      const SizedBox(height: 14),
+                      TextField(
+                        controller: controller,
+                        autofocus: true,
+                        decoration: InputDecoration(
+                          labelText: "Food Name",
+                          hintText: "e.g. Fish Rice, Tofu Rice",
+                          filled: true,
+                          fillColor: theme.brightness == Brightness.dark
+                              ? theme.colorScheme.surfaceContainerHighest.withValues(alpha: 0.5)
+                              : Colors.grey.shade50,
+                          border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                          contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                        ),
+                        onChanged: (_) => setDialogState(() {}),
+                      ),
+                      const SizedBox(height: 10),
+                      Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Icon(
+                            canRecalculateWithAi ? Icons.auto_awesome : Icons.info_outline,
+                            size: 14,
+                            color: canRecalculateWithAi ? Colors.teal : Colors.grey,
+                          ),
+                          const SizedBox(width: 6),
+                          Expanded(
+                            child: Text(
+                              canRecalculateWithAi
+                                  ? "AI Recalculations remaining: $remainingRecalculations/$_maxRecalculations"
+                                  : "AI limit reached ($remainingRecalculations/$_maxRecalculations). Manual edit allowed.",
+                              style: TextStyle(
+                                fontSize: 11,
+                                fontWeight: FontWeight.w500,
+                                color: canRecalculateWithAi ? Colors.teal.shade800 : Colors.grey.shade700,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 20),
+                      Align(
+                        alignment: Alignment.centerRight,
+                        child: Wrap(
+                          alignment: WrapAlignment.end,
+                          crossAxisAlignment: WrapCrossAlignment.center,
+                          spacing: 8,
+                          runSpacing: 8,
+                          children: [
+                            TextButton(
+                              onPressed: () => Navigator.pop(ctx),
+                              child: const Text("Cancel"),
+                            ),
+                            OutlinedButton(
+                              onPressed: () {
+                                final trimmed = controller.text.trim();
+                                if (trimmed.isNotEmpty) {
+                                  Navigator.pop(ctx, {'action': 'keep_only', 'name': trimmed});
+                                }
+                              },
+                              style: OutlinedButton.styleFrom(
+                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                              ),
+                              child: const Text("Keep Name Only"),
+                            ),
+                            ElevatedButton.icon(
+                              onPressed: canRecalculateWithAi
+                                  ? () {
+                                      final trimmed = controller.text.trim();
+                                      if (trimmed.isNotEmpty) {
+                                        Navigator.pop(ctx, {'action': 'recalculate', 'name': trimmed});
+                                      }
+                                    }
+                                  : null,
+                              icon: const Icon(Icons.auto_awesome, size: 16),
+                              label: const Text("Recalculate with AI"),
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: Colors.teal,
+                                foregroundColor: Colors.white,
+                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            );
+          },
+        );
+      },
     );
 
-    if (newName != null && newName.isNotEmpty) {
+    if (result == null) return;
+
+    final action = result['action'] as String;
+    final newName = result['name'] as String;
+
+    if (action == 'keep_only') {
       setState(() {
         _items[index]['name'] = newName;
+        _items[index]['isCorrected'] = true;
+        _wasUserCorrected = true;
+        _originalDetectedFoodName ??= originalName;
+        _correctedFoodName = newName;
+        if (_items.length == 1) {
+          _mealNameController.text = newName;
+        } else {
+          _mealNameController.text = _buildMealTitleFromItems(_items);
+        }
       });
+      _notifyEdits();
+      return;
     }
+
+    if (action == 'recalculate') {
+      await _performRecalculation(index: index, originalName: originalName, correctedName: newName);
+    }
+  }
+
+  Future<Uint8List?> _resolveImageBytes() async {
+    if (widget.imageBytes != null && widget.imageBytes!.isNotEmpty) {
+      return widget.imageBytes;
+    }
+    if (widget.imageFile != null && widget.imageFile!.existsSync()) {
+      try {
+        final bytes = await widget.imageFile!.readAsBytes();
+        if (bytes.isNotEmpty) return bytes;
+      } catch (e) {
+        debugPrint("[ScanResultReview] Error reading imageFile bytes: $e");
+      }
+    }
+    if (widget.imageHash != null && widget.imageHash!.isNotEmpty) {
+      final bytes = await LocalFoodImageService.instance.getImageBytes(widget.imageHash!);
+      if (bytes != null && bytes.isNotEmpty) {
+        return bytes;
+      }
+    }
+    return null;
+  }
+
+  Future<void> _performRecalculation({
+    required int index,
+    required String originalName,
+    required String correctedName,
+  }) async {
+    final imageBytes = await _resolveImageBytes();
+    if (imageBytes == null || imageBytes.isEmpty) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text("Original scan image is no longer available.")),
+        );
+      }
+      return;
+    }
+
+    final String imageHash = widget.imageHash ?? ScanFoodCacheService.instance.computeImageHash(imageBytes);
+    final previousServingGrams = (_items[index]['servingGrams'] as num?)?.toDouble() ??
+        (_items[index]['baseGrams'] as num?)?.toDouble();
+
+    setState(() {
+      _isRecalculating = true;
+    });
+
+    try {
+      // 1. Check local cache with distinct corrected key
+      Map<String, dynamic>? analysisData = await ScanFoodCacheService.instance.getCachedAnalysis(
+        imageHash,
+        dietPreference: widget.dietPreference,
+        allergies: widget.allergies,
+        correctedFoodName: correctedName,
+      );
+
+      // 2. If not cached, call backend recalculate-food endpoint (or mock callback in tests)
+      if (analysisData == null) {
+        if (widget.recalculateFn != null) {
+          analysisData = await widget.recalculateFn!(
+            imageBytes: imageBytes,
+            correctedFoodName: correctedName,
+            previousServingGrams: previousServingGrams,
+            userGoal: widget.userGoal,
+            calorieTarget: widget.calorieTarget,
+            dietPreference: widget.dietPreference,
+            allergies: widget.allergies,
+          );
+        } else {
+          analysisData = await AiService.recalculateFoodNutrition(
+            imageBytes: imageBytes,
+            correctedFoodName: correctedName,
+            previousServingGrams: previousServingGrams,
+            userGoal: widget.userGoal,
+            calorieTarget: widget.calorieTarget,
+            dietPreference: widget.dietPreference,
+            allergies: widget.allergies,
+          );
+        }
+      }
+
+      // 3. Defense-in-depth: client-side dietary & allergy evaluation
+      analysisData = DietPersonalizationService.sanitizeAndEvaluate(
+        analysisData,
+        dietPreference: widget.dietPreference,
+        allergies: widget.allergies,
+      );
+
+      // 4. Save to persistent cache under corrected key
+      await ScanFoodCacheService.instance.saveAnalysis(
+        imageHash,
+        analysisData,
+        dietPreference: widget.dietPreference,
+        allergies: widget.allergies,
+        correctedFoodName: correctedName,
+      );
+
+      if (!mounted) return;
+
+      // 5. Update items and state while strictly preserving user's authoritative corrected name
+      final rawFoods = analysisData['foods'] as List? ?? [];
+      Map<String, dynamic>? recalculatedPrimary;
+      if (rawFoods.isNotEmpty && rawFoods[0] is Map) {
+        recalculatedPrimary = Map<String, dynamic>.from(rawFoods[0] as Map);
+      }
+
+      final cals = (recalculatedPrimary?['calories'] as num?)?.toInt() ??
+          (analysisData['totalCalories'] as num?)?.toInt() ??
+          _items[index]['calories'] as int;
+      final pro = ((recalculatedPrimary?['protein'] ?? recalculatedPrimary?['proteins'] ?? analysisData['totalProteins'] ?? 0) as num).toInt();
+      final carbs = ((recalculatedPrimary?['carbs'] ?? analysisData['totalCarbs'] ?? 0) as num).toInt();
+      final fat = ((recalculatedPrimary?['fat'] ?? recalculatedPrimary?['fats'] ?? analysisData['totalFats'] ?? 0) as num).toInt();
+      final grams = (recalculatedPrimary?['servingGrams'] ?? recalculatedPrimary?['serving_grams'] as num?)?.toDouble() ??
+          previousServingGrams ?? 100.0;
+
+      setState(() {
+        _isRecalculating = false;
+        _recalculationCount += 1;
+        _wasUserCorrected = true;
+        _originalDetectedFoodName ??= originalName;
+        _correctedFoodName = correctedName;
+
+        _items[index] = {
+          'name': correctedName,
+          'baseCalories': cals,
+          'baseProtein': pro,
+          'baseCarbs': carbs,
+          'baseFat': fat,
+          'baseGrams': grams,
+          'multiplier': 1.0,
+          'calories': cals,
+          'protein': pro,
+          'carbs': carbs,
+          'fat': fat,
+          'servingGrams': grams,
+          'nutritionSource': recalculatedPrimary?['nutritionSource'] ?? 'ai_recalculation',
+          'matchedFoodName': recalculatedPrimary?['matchedFoodName'],
+          'isCorrected': true,
+        };
+
+        _currentAnalysis = {
+          ..._currentAnalysis,
+          ...analysisData!,
+        };
+
+        if (_items.length == 1) {
+          _mealNameController.text = correctedName;
+        } else {
+          _mealNameController.text = _buildMealTitleFromItems(_items);
+        }
+      });
+
+      _recalculateTotals();
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Row(
+              children: [
+                const Icon(Icons.check_circle_outline, color: Colors.white, size: 18),
+                const SizedBox(width: 8),
+                Expanded(child: Text("Updated nutrition for '$correctedName'")),
+              ],
+            ),
+            backgroundColor: Colors.teal.shade800,
+            duration: const Duration(seconds: 3),
+          ),
+        );
+      }
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _isRecalculating = false;
+      });
+
+      // Preserve user corrected name on failure without losing it!
+      _showRecalculationFailureDialog(
+        index: index,
+        originalName: originalName,
+        correctedName: correctedName,
+        errorMessage: e.toString(),
+      );
+    }
+  }
+
+  void _showRecalculationFailureDialog({
+    required int index,
+    required String originalName,
+    required String correctedName,
+    required String errorMessage,
+  }) {
+    final theme = Theme.of(context);
+    showDialog(
+      context: context,
+      builder: (ctx) => Dialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        insetPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 24),
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 420),
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.fromLTRB(20, 20, 20, 16),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    const Icon(Icons.error_outline_rounded, color: Colors.redAccent),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        "Recalculation Failed",
+                        style: TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.bold,
+                          color: theme.colorScheme.onSurface,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 12),
+                Text(
+                  "Unable to recalculate nutrition right now. Your corrected food name will not be lost.",
+                  style: TextStyle(fontSize: 13, height: 1.35, color: theme.colorScheme.onSurface),
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  "Food: $correctedName",
+                  style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: Colors.teal),
+                ),
+                if (errorMessage.isNotEmpty) ...[
+                  const SizedBox(height: 10),
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.all(10),
+                    decoration: BoxDecoration(
+                      color: Colors.red.shade50.withValues(alpha: theme.brightness == Brightness.dark ? 0.15 : 0.6),
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: Colors.red.shade300.withValues(alpha: 0.5)),
+                    ),
+                    child: Text(
+                      "Details: $errorMessage",
+                      style: TextStyle(
+                        fontSize: 11,
+                        color: theme.brightness == Brightness.dark ? Colors.red.shade200 : Colors.red.shade900,
+                        fontFamily: 'monospace',
+                      ),
+                    ),
+                  ),
+                ],
+                const SizedBox(height: 20),
+                Align(
+                  alignment: Alignment.centerRight,
+                  child: Wrap(
+                    alignment: WrapAlignment.end,
+                    crossAxisAlignment: WrapCrossAlignment.center,
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: [
+                      TextButton(
+                        onPressed: () => Navigator.pop(ctx),
+                        child: const Text("Cancel"),
+                      ),
+                      OutlinedButton(
+                        onPressed: () {
+                          Navigator.pop(ctx);
+                          setState(() {
+                            _items[index]['name'] = correctedName;
+                            _items[index]['isCorrected'] = true;
+                            _wasUserCorrected = true;
+                            _originalDetectedFoodName ??= originalName;
+                            _correctedFoodName = correctedName;
+                            if (_items.length == 1) {
+                              _mealNameController.text = correctedName;
+                            } else {
+                              _mealNameController.text = _buildMealTitleFromItems(_items);
+                            }
+                          });
+                          _notifyEdits();
+                        },
+                        child: const Text("Keep edited name"),
+                      ),
+                      ElevatedButton(
+                        onPressed: () {
+                          Navigator.pop(ctx);
+                          _performRecalculation(
+                            index: index,
+                            originalName: originalName,
+                            correctedName: correctedName,
+                          );
+                        },
+                        style: ElevatedButton.styleFrom(backgroundColor: Colors.teal, foregroundColor: Colors.white),
+                        child: const Text("Retry"),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
   }
 
   Map<String, dynamic> _buildCurrentPayload() {
@@ -222,6 +714,7 @@ class _ScanResultReviewSheetState extends State<ScanResultReviewSheet> {
         'servingGrams': item['servingGrams'],
         if (item['nutritionSource'] != null) 'nutritionSource': item['nutritionSource'],
         if (item['matchedFoodName'] != null) 'matchedFoodName': item['matchedFoodName'],
+        if (item['isCorrected'] == true) 'isCorrected': true,
       };
     }).toList();
 
@@ -229,20 +722,28 @@ class _ScanResultReviewSheetState extends State<ScanResultReviewSheet> {
       'name': _mealNameController.text.trim().isNotEmpty
           ? _mealNameController.text.trim()
           : _buildMealTitleFromItems(_items),
-      'mealType': widget.initialAnalysis['mealType'] ?? 'Meal',
+      'mealType': _currentAnalysis['mealType'] ?? 'Meal',
       'foods': finalFoods,
       'calories': _totalCalories,
       'protein': _totalProtein,
       'carbs': _totalCarbs,
       'fat': _totalFat,
-      'mealScore': (widget.initialAnalysis['score'] as num?)?.toInt() ?? 0,
-      'scoreExplanation': widget.initialAnalysis['explanation'] ?? '',
-      'healthierAlternatives': List<String>.from(widget.initialAnalysis['alternatives'] ?? []),
-      'dietCompatibility': widget.initialAnalysis['dietCompatibility'] ?? 'compatible',
-      if (widget.initialAnalysis['dietNotice'] != null) 'dietNotice': widget.initialAnalysis['dietNotice'],
-      if (widget.initialAnalysis['allergyNotice'] != null) 'allergyNotice': widget.initialAnalysis['allergyNotice'],
+      'mealScore': (_currentAnalysis['score'] as num?)?.toInt() ?? 0,
+      'scoreExplanation': _currentAnalysis['explanation'] ?? '',
+      'healthierAlternatives': List<String>.from(_currentAnalysis['alternatives'] ?? []),
+      'dietCompatibility': _currentAnalysis['dietCompatibility'] ?? 'compatible',
+      if (_currentAnalysis['dietNotice'] != null) 'dietNotice': _currentAnalysis['dietNotice'],
+      if (_currentAnalysis['allergyNotice'] != null) 'allergyNotice': _currentAnalysis['allergyNotice'],
       'source': 'ai_scan',
       'nutritionSource': 'ai_scan',
+      // Human-in-the-loop FYP evaluation metadata
+      'wasUserCorrected': _wasUserCorrected,
+      if (_wasUserCorrected && _originalDetectedFoodName != null)
+        'originalDetectedFoodName': _originalDetectedFoodName,
+      if (_wasUserCorrected && _correctedFoodName != null)
+        'correctedFoodName': _correctedFoodName,
+      if (_wasUserCorrected)
+        'correctionCount': _recalculationCount,
     };
   }
 
@@ -286,8 +787,10 @@ class _ScanResultReviewSheetState extends State<ScanResultReviewSheet> {
         maxChildSize: 0.95,
         minChildSize: 0.5,
         expand: false,
-        builder: (context, scrollController) => Column(
+        builder: (context, scrollController) => Stack(
           children: [
+            Column(
+              children: [
             // Drag handle
             Container(
               margin: const EdgeInsets.symmetric(vertical: 12),
@@ -483,23 +986,23 @@ class _ScanResultReviewSheetState extends State<ScanResultReviewSheet> {
                   ),
 
                   // Diet Compatibility Notice Card
-                  if (widget.initialAnalysis['dietNotice'] != null &&
-                      widget.initialAnalysis['dietNotice'].toString().trim().isNotEmpty) ...[
+                  if (_currentAnalysis['dietNotice'] != null &&
+                      _currentAnalysis['dietNotice'].toString().trim().isNotEmpty) ...[
                     const SizedBox(height: 12),
                     _buildDietNoticeCard(
                       theme: theme,
-                      notice: widget.initialAnalysis['dietNotice'].toString(),
-                      isCaution: widget.initialAnalysis['dietCompatibility'] == 'caution',
+                      notice: _currentAnalysis['dietNotice'].toString(),
+                      isCaution: _currentAnalysis['dietCompatibility'] == 'caution',
                     ),
                   ],
 
                   // Allergy Notice Card
-                  if (widget.initialAnalysis['allergyNotice'] != null &&
-                      widget.initialAnalysis['allergyNotice'].toString().trim().isNotEmpty) ...[
+                  if (_currentAnalysis['allergyNotice'] != null &&
+                      _currentAnalysis['allergyNotice'].toString().trim().isNotEmpty) ...[
                     const SizedBox(height: 12),
                     _buildAllergyNoticeCard(
                       theme: theme,
-                      notice: widget.initialAnalysis['allergyNotice'].toString(),
+                      notice: _currentAnalysis['allergyNotice'].toString(),
                     ),
                   ],
 
@@ -643,6 +1146,32 @@ class _ScanResultReviewSheetState extends State<ScanResultReviewSheet> {
                                   ),
                                 ),
                               ],
+                              if (item['isCorrected'] == true) ...[
+                                const SizedBox(height: 6),
+                                Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                                  decoration: BoxDecoration(
+                                    color: Colors.teal.shade50.withValues(alpha: theme.brightness == Brightness.dark ? 0.2 : 0.9),
+                                    borderRadius: BorderRadius.circular(6),
+                                    border: Border.all(color: Colors.teal.shade300),
+                                  ),
+                                  child: Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      Icon(Icons.auto_awesome, size: 11, color: Colors.teal.shade700),
+                                      const SizedBox(width: 4),
+                                      Text(
+                                        "Updated after your correction",
+                                        style: TextStyle(
+                                          fontSize: 10,
+                                          fontWeight: FontWeight.bold,
+                                          color: Colors.teal.shade800,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ],
                             ],
                           ),
                         ),
@@ -650,8 +1179,8 @@ class _ScanResultReviewSheetState extends State<ScanResultReviewSheet> {
                     }),
 
                   // Personalization & Dietitian Insight Preview
-                  if (widget.initialAnalysis['explanation'] != null &&
-                      widget.initialAnalysis['explanation'].toString().trim().isNotEmpty) ...[
+                  if (_currentAnalysis['explanation'] != null &&
+                      _currentAnalysis['explanation'].toString().trim().isNotEmpty) ...[
                     const SizedBox(height: 10),
                     Container(
                       padding: const EdgeInsets.all(12),
@@ -685,7 +1214,7 @@ class _ScanResultReviewSheetState extends State<ScanResultReviewSheet> {
                                 ),
                                 const SizedBox(height: 3),
                                 Text(
-                                  widget.initialAnalysis['explanation'].toString(),
+                                  _currentAnalysis['explanation'].toString(),
                                   style: TextStyle(
                                     fontSize: 12,
                                     color: theme.colorScheme.onSurface,
@@ -701,8 +1230,8 @@ class _ScanResultReviewSheetState extends State<ScanResultReviewSheet> {
                   ],
 
                   // Healthier Alternatives Preview
-                  if (widget.initialAnalysis['alternatives'] is List &&
-                      (widget.initialAnalysis['alternatives'] as List).isNotEmpty) ...[
+                  if (_currentAnalysis['alternatives'] is List &&
+                      (_currentAnalysis['alternatives'] as List).isNotEmpty) ...[
                     const SizedBox(height: 14),
                     Text(
                       "💡 HEALTHIER ALTERNATIVES",
@@ -714,7 +1243,7 @@ class _ScanResultReviewSheetState extends State<ScanResultReviewSheet> {
                       ),
                     ),
                     const SizedBox(height: 6),
-                    ...(widget.initialAnalysis['alternatives'] as List).map(
+                    ...(_currentAnalysis['alternatives'] as List).map(
                       (alt) => Padding(
                         padding: const EdgeInsets.only(bottom: 6),
                         child: Row(
@@ -818,7 +1347,54 @@ class _ScanResultReviewSheetState extends State<ScanResultReviewSheet> {
             ),
           ],
         ),
+        if (_isRecalculating)
+          Positioned.fill(
+            child: Container(
+              color: Colors.black.withValues(alpha: 0.5),
+              child: Center(
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 20),
+                  decoration: BoxDecoration(
+                    color: theme.cardColor,
+                    borderRadius: BorderRadius.circular(16),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withValues(alpha: 0.15),
+                        blurRadius: 10,
+                        offset: const Offset(0, 4),
+                      ),
+                    ],
+                  ),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const CircularProgressIndicator(color: Colors.teal),
+                      const SizedBox(height: 16),
+                      Text(
+                        "Recalculating with AI...",
+                        style: TextStyle(
+                          fontWeight: FontWeight.bold,
+                          fontSize: 15,
+                          color: theme.colorScheme.onSurface,
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        "Estimating portion & nutrition from image",
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: theme.colorScheme.onSurfaceVariant,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ],
       ),
+    ),
     );
   }
 

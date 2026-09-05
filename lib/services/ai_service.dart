@@ -113,6 +113,125 @@ class AiService {
     }
   }
 
+  /// Recalculates nutritional breakdown for a user-corrected food identity using the original image.
+  ///
+  /// Transmits image bytes, corrected food name, and dietary context via multipart/form-data directly to:
+  /// `POST ${AppConfig.apiBaseUrl}/api/ai/recalculate-food`
+  static Future<Map<String, dynamic>> recalculateFoodNutrition({
+    required Uint8List imageBytes,
+    required String correctedFoodName,
+    double? previousServingGrams,
+    String userGoal = 'Maintenance',
+    int? calorieTarget,
+    String dietPreference = 'Standard',
+    List<String> allergies = const [],
+    http.Client? httpClient,
+  }) async {
+    String? token;
+    try {
+      final user = FirebaseAuth.instance.currentUser;
+      token = await user?.getIdToken();
+    } catch (_) {
+      // In unit test environments without Firebase initialized, continue without token
+    }
+
+    final uri = Uri.parse('${AppConfig.apiBaseUrl}/api/ai/recalculate-food');
+
+    try {
+      final request = http.MultipartRequest('POST', uri)
+        ..fields['corrected_food_name'] = correctedFoodName
+        ..fields['user_goal'] = userGoal
+        ..fields['diet_preference'] = dietPreference;
+
+      if (previousServingGrams != null && previousServingGrams > 0) {
+        request.fields['previous_serving_grams'] = previousServingGrams.toString();
+      }
+
+      if (calorieTarget != null && calorieTarget > 0) {
+        request.fields['calorie_target'] = calorieTarget.toString();
+      }
+
+      if (allergies.isNotEmpty) {
+        request.fields['allergies'] = json.encode(allergies);
+      }
+
+      request.files.add(
+        http.MultipartFile.fromBytes(
+          'file',
+          imageBytes,
+          filename: 'food_scan_correction.jpg',
+          contentType: MediaType('image', 'jpeg'),
+        ),
+      );
+
+      if (token != null) {
+        request.headers['Authorization'] = 'Bearer $token';
+      }
+
+      debugPrint('[AiService] Sending recalculation request to $uri');
+      debugPrint('[AiService] Fields: corrected_food_name=$correctedFoodName, serving=$previousServingGrams, goal=$userGoal, diet=$dietPreference, allergies=$allergies');
+      debugPrint('[AiService] Image file payload: ${imageBytes.length} bytes');
+
+      final client = httpClient ?? http.Client();
+      final streamedResponse = await client.send(request).timeout(
+        const Duration(seconds: AppConfig.requestTimeoutSeconds),
+        onTimeout: () => throw TimeoutException(
+          'Food recalculation timed out after ${AppConfig.requestTimeoutSeconds}s (Render cold start or network delay). Please retry.',
+        ),
+      );
+
+      final response = await http.Response.fromStream(streamedResponse);
+      debugPrint('[AiService] Recalculation Response: HTTP ${response.statusCode}, body: ${response.body}');
+
+      if (response.statusCode == 200) {
+        final data = json.decode(response.body);
+        if (data is Map<String, dynamic>) {
+          return DietPersonalizationService.sanitizeAndEvaluate(
+            data,
+            dietPreference: dietPreference,
+            allergies: allergies,
+          );
+        }
+        throw const FormatException('Expected JSON map response from backend.');
+      } else {
+        String errorDetail = response.body;
+        try {
+          final errorJson = json.decode(response.body);
+          if (errorJson is Map && errorJson.containsKey('detail')) {
+            errorDetail = errorJson['detail'].toString();
+          }
+        } catch (_) {}
+
+        if (response.statusCode == 404) {
+          throw Exception('Backend endpoint not found (404). Backend deployment is stale.');
+        } else if (response.statusCode == 422) {
+          throw Exception('Request field mismatch (422): $errorDetail');
+        } else if (response.statusCode == 400) {
+          throw Exception('Invalid recalculation data (400): $errorDetail');
+        } else if (response.statusCode == 401 || response.statusCode == 403) {
+          throw Exception('Backend authentication failed (${response.statusCode}): $errorDetail');
+        } else if (response.statusCode == 503) {
+          throw Exception(errorDetail.isNotEmpty ? errorDetail : 'AI service is temporarily busy (503). Please try again shortly.');
+        } else if (response.statusCode >= 500) {
+          throw Exception('Backend server error (${response.statusCode}): $errorDetail');
+        } else {
+          throw Exception('Backend error (${response.statusCode}): $errorDetail');
+        }
+      }
+    } on SocketException {
+      throw Exception(
+        'Cannot connect to backend at ${AppConfig.apiBaseUrl}. Ensure the FastAPI server is running.',
+      );
+    } on TimeoutException {
+      throw Exception(
+        'Food recalculation request timed out. Please check your network and backend server.',
+      );
+    } catch (e) {
+      if (e is Exception) rethrow;
+      throw Exception('Unexpected error during food recalculation: $e');
+    }
+  }
+
   /// Generates custom workout routine plans via the backend API.
   static Future<List<Map<String, dynamic>>> generateWorkoutPlan({
     String userGoal = 'Maintenance',

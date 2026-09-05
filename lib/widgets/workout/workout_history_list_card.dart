@@ -108,35 +108,102 @@ class _WorkoutHistoryListCardState extends State<WorkoutHistoryListCard> {
 
                     const SizedBox(height: 12),
 
-                    // Routine Name
-                    Text(
-                      s.routineName,
-                      style: const TextStyle(
-                        fontSize: 16,
-                        fontWeight: FontWeight.bold,
-                        color: Colors.black87,
-                      ),
+                    // Routine Name + Source Badge
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            s.routineName,
+                            style: const TextStyle(
+                              fontSize: 16,
+                              fontWeight: FontWeight.bold,
+                              color: Colors.black87,
+                            ),
+                          ),
+                        ),
+                        if (s.isMerged) ...[
+                          const SizedBox(width: 6),
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                            decoration: BoxDecoration(
+                              color: Colors.teal.shade50,
+                              borderRadius: BorderRadius.circular(6),
+                              border: Border.all(color: Colors.teal.shade200),
+                            ),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(Icons.merge_type_rounded, size: 11, color: Colors.teal.shade800),
+                                const SizedBox(width: 3),
+                                Text(
+                                  "FitLoop + ${s.sourceName ?? 'Health Connect'}",
+                                  style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Colors.teal.shade800),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ] else if (s.isExternal) ...[
+                          const SizedBox(width: 6),
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                            decoration: BoxDecoration(
+                              color: Colors.blue.shade50,
+                              borderRadius: BorderRadius.circular(6),
+                              border: Border.all(color: Colors.blue.shade200),
+                            ),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(Icons.watch_rounded, size: 11, color: Colors.blue.shade800),
+                                const SizedBox(width: 3),
+                                Text(
+                                  s.sourceName ?? 'Health Connect',
+                                  style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Colors.blue.shade800),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ],
                     ),
 
                     const SizedBox(height: 8),
 
-                    // Stats row (Volume + Total Sets + Calories) — Wrap prevents overflow
+                    // Stats row (Volume + Total Sets + Calories / Distance) — Wrap prevents overflow
                     Wrap(
                       spacing: 10,
                       runSpacing: 4,
                       children: [
-                        Text(
-                          "Volume: ${s.totalVolumeKg.toInt()} kg",
-                          style: TextStyle(fontSize: 12, color: Colors.grey.shade700, fontWeight: FontWeight.w500),
-                        ),
-                        Text(
-                          "•  ${s.totalSets} sets",
-                          style: TextStyle(fontSize: 12, color: Colors.grey.shade700, fontWeight: FontWeight.w500),
-                        ),
-                        Text(
-                          "•  ${s.caloriesBurned} kcal",
-                          style: TextStyle(fontSize: 12, color: Colors.orange.shade800, fontWeight: FontWeight.w600),
-                        ),
+                        if (s.isExternal && !s.isMerged) ...[
+                          if (s.distanceKm != null)
+                            Text(
+                              "Distance: ${s.distanceKm!.toStringAsFixed(2)} km",
+                              style: TextStyle(fontSize: 12, color: Colors.grey.shade700, fontWeight: FontWeight.w500),
+                            ),
+                          if (s.hasCalories)
+                            Text(
+                              "${s.distanceKm != null ? '•  ' : ''}${s.caloriesBurned} kcal",
+                              style: TextStyle(fontSize: 12, color: Colors.orange.shade800, fontWeight: FontWeight.w600),
+                            )
+                          else
+                            Text(
+                              "${s.distanceKm != null ? '•  ' : ''}No calorie data",
+                              style: TextStyle(fontSize: 12, color: Colors.grey.shade600, fontStyle: FontStyle.italic),
+                            ),
+                        ] else ...[
+                          Text(
+                            "Volume: ${s.totalVolumeKg.toInt()} kg",
+                            style: TextStyle(fontSize: 12, color: Colors.grey.shade700, fontWeight: FontWeight.w500),
+                          ),
+                          Text(
+                            "•  ${s.totalSets} sets",
+                            style: TextStyle(fontSize: 12, color: Colors.grey.shade700, fontWeight: FontWeight.w500),
+                          ),
+                          Text(
+                            "•  ${s.caloriesBurned} kcal",
+                            style: TextStyle(fontSize: 12, color: Colors.orange.shade800, fontWeight: FontWeight.w600),
+                          ),
+                        ],
                       ],
                     ),
 
@@ -189,9 +256,9 @@ class _WorkoutHistoryListCardState extends State<WorkoutHistoryListCard> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const Text(
-                      "EXERCISE LOG DETAILS",
-                      style: TextStyle(
+                    Text(
+                      s.isExternal && !s.isMerged ? "EXTERNAL WORKOUT DETAILS" : "EXERCISE LOG DETAILS",
+                      style: const TextStyle(
                         fontSize: 11,
                         fontWeight: FontWeight.bold,
                         letterSpacing: 1.0,
@@ -199,7 +266,37 @@ class _WorkoutHistoryListCardState extends State<WorkoutHistoryListCard> {
                       ),
                     ),
                     const SizedBox(height: 12),
-                    ...s.exercises.map((ex) => _buildExerciseDetailRow(ex)),
+                    if (s.isExternal && !s.isMerged && s.exercises.isEmpty)
+                      Container(
+                        padding: const EdgeInsets.all(12),
+                        decoration: BoxDecoration(
+                          color: Colors.white,
+                          borderRadius: BorderRadius.circular(10),
+                          border: Border.all(color: Colors.grey.shade200),
+                        ),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Row(
+                              children: [
+                                const Icon(Icons.info_outline, size: 14, color: Colors.blue),
+                                const SizedBox(width: 6),
+                                Text(
+                                  "Imported via ${s.sourceName ?? 'Android Health Connect'}",
+                                  style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.black87),
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 6),
+                            Text(
+                              "Session duration: ${s.durationMinutes} minutes${s.distanceKm != null ? ' • Distance: ${s.distanceKm!.toStringAsFixed(2)} km' : ''}${s.hasCalories ? ' • Calories: ${s.caloriesBurned} kcal' : ''}",
+                              style: TextStyle(fontSize: 11, color: Colors.grey.shade600),
+                            ),
+                          ],
+                        ),
+                      )
+                    else
+                      ...s.exercises.map((ex) => _buildExerciseDetailRow(ex)),
                   ],
                 ),
               ),

@@ -12,6 +12,8 @@ import 'workout_analytics_screen.dart';
 import 'build_routine_screen.dart';
 import '../widgets/workout/workout_setup_sheet.dart';
 import '../utils/routine_category_classifier.dart';
+import '../services/workout_category_validator.dart';
+import '../services/daily_recommendation_service.dart';
 
 class WorkoutHubScreen extends StatefulWidget {
   const WorkoutHubScreen({super.key});
@@ -203,21 +205,18 @@ class _WorkoutHubScreenState extends State<WorkoutHubScreen> {
       int skippedDuplicatesCount = 0;
       bool dialogDismissed = false;
 
-      for (var routine in generatedRoutines) {
+      for (var rawRoutine in generatedRoutines) {
+        // Strict Post-Generation Category, Equipment, Level & Deduplication Validator & Repair
+        final routine = WorkoutCategoryValidator.validateAndRepairRoutine(
+          rawRoutine,
+          requestedCategory: targetCategory,
+          availableEquipment: equipment,
+          fitnessLevel: effectiveDifficulty,
+        );
+
         final String routineName = routine['name'] ?? routine['routineName'] ?? 'Custom Routine';
         final String routineLevel = routine['fitnessLevel'] ?? routine['level'] ?? difficulty;
-
-        // Normalize routine category
-        String routineCategory = routine['category'] ?? 'Full Body';
-        if (targetCategory != null && targetCategory.isNotEmpty && targetCategory != "All") {
-          routineCategory = targetCategory;
-        } else {
-          final lowerCat = routineCategory.toLowerCase();
-          if (lowerCat == 'waist' || lowerCat == 'abs' || lowerCat == 'abdominals') {
-            routineCategory = 'Core';
-          }
-        }
-
+        final String routineCategory = routine['category'] ?? 'Full Body';
         final String routineImage = routine['imageUrl'] ?? routine['image'] ?? 'https://images.unsplash.com/photo-1517836357463-d25dfeac3438?w=400';
         final List<dynamic> rawExercises = routine['exercises'] ?? [];
 
@@ -227,12 +226,7 @@ class _WorkoutHubScreenState extends State<WorkoutHubScreen> {
             final String exName = e['name'] ?? e['exerciseName'] ?? '';
             if (exName.trim().isEmpty) continue;
 
-            String target = e['target'] ?? e['category'] ?? routineCategory;
-            final lowerTarget = target.toLowerCase();
-            if (lowerTarget == 'abs' || lowerTarget == 'waist' || lowerTarget == 'abdominals') {
-              target = 'Core';
-            }
-
+            final String target = e['target'] ?? e['category'] ?? routineCategory;
             final String exEquipment = e['equipment'] ?? 'Bodyweight';
             final String setsReps = e['sets']?.toString() ?? '3 sets x 10 reps';
             final String instructions = e['instructions'] ?? e['desc'] ?? '';
@@ -517,6 +511,12 @@ class _WorkoutHubScreenState extends State<WorkoutHubScreen> {
               (userData['preferredWorkoutTypes'] as List).map((e) => e.toString()),
             );
           }
+          List<String> userEquipment = [];
+          if (userData['equipment'] is List) {
+            userEquipment = List<String>.from(
+              (userData['equipment'] as List).map((e) => e.toString()),
+            );
+          }
 
           return StreamBuilder<QuerySnapshot>(
             stream: FirebaseFirestore.instance
@@ -600,40 +600,15 @@ class _WorkoutHubScreenState extends State<WorkoutHubScreen> {
 
                   final List<WorkoutRoutine> routines = uniqueRoutinesMap.values.toList();
 
-                  // Select ONE Featured Routine (Today's / Recommended):
-                  // Real Level & Preference Priority:
-                  // 1. Strict Level Enforcement: routines matching user's current fitnessLevel
-                  // 2. Prioritize routines matching preferredWorkoutTypes
-                  // 3. Prioritize routines matching userGoal
-                  WorkoutRoutine? featuredRoutine;
-                  if (routines.isNotEmpty) {
-                    final cleanUserLevel = userLevel.toLowerCase();
-                    final sameLevelRoutines = routines.where(
-                      (r) => r.level.displayName.toLowerCase() == cleanUserLevel,
-                    ).toList();
-
-                    // Candidate pool: strictly matching level if any exist; otherwise fallback to all
-                    final candidatePool = sameLevelRoutines.isNotEmpty ? sameLevelRoutines : routines;
-
-                    // Rank within candidate pool
-                    featuredRoutine = candidatePool.firstWhere(
-                      (r) => r.isAiGenerated &&
-                             preferredWorkoutTypes.any((pref) => RoutineCategoryClassifier.matchesRoutine(r, pref)) &&
-                             r.goal.displayName.toLowerCase() == userGoal.toLowerCase(),
-                      orElse: () => candidatePool.firstWhere(
-                        (r) => r.isAiGenerated &&
-                               preferredWorkoutTypes.any((pref) => RoutineCategoryClassifier.matchesRoutine(r, pref)),
-                        orElse: () => candidatePool.firstWhere(
-                          (r) => r.isAiGenerated &&
-                                 r.goal.displayName.toLowerCase() == userGoal.toLowerCase(),
-                          orElse: () => candidatePool.firstWhere(
-                            (r) => r.isAiGenerated,
-                            orElse: () => candidatePool.first,
-                          ),
-                        ),
-                      ),
-                    );
-                  }
+                  // Deterministic Daily Recommendation (4-Day Split Rotation: Chest+Tri, Back+Bi, Shoulders+Abs, Legs+Abs)
+                  // Stable throughout the calendar date, personalized to userLevel and equipment, 7-day non-repetition.
+                  final featuredRoutine = DailyRecommendationService.getDailyRecommendation(
+                    userId: user.uid,
+                    fitnessLevel: userLevel,
+                    userEquipment: userEquipment,
+                    preferredWorkoutTypes: preferredWorkoutTypes,
+                    userGoal: userGoal,
+                  );
 
                   // Filter for "Your Routines" list using centralized multi-tier classifier
                   final filteredRoutines = _selectedCategory == "All"
@@ -659,14 +634,11 @@ class _WorkoutHubScreenState extends State<WorkoutHubScreen> {
                         WorkoutStreakHeader(streakSummary: streakSummary),
 
                         // 2. Primary Hero Card: Today's / Recommended Routine
-                        if (featuredRoutine != null)
-                          DailyRoutineCard(
-                            routine: featuredRoutine,
-                            onStart: () => _startRoutine(featuredRoutine!),
-                            onTap: () => _openRoutineDetails(featuredRoutine!),
-                          )
-                        else
-                          _buildEmptyHeroCard(userGoal, userLevel),
+                        DailyRoutineCard(
+                          routine: featuredRoutine,
+                          onStart: () => _startRoutine(featuredRoutine),
+                          onTap: () => _openRoutineDetails(featuredRoutine),
+                        ),
 
                         const SizedBox(height: 16),
 
@@ -856,85 +828,7 @@ class _WorkoutHubScreenState extends State<WorkoutHubScreen> {
     );
   }
 
-  Widget _buildEmptyHeroCard(String goal, String level) {
-    return Container(
-      margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-      padding: const EdgeInsets.all(22),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: Colors.teal.shade200, width: 1.5),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.04),
-            blurRadius: 12,
-            offset: const Offset(0, 3),
-          ),
-        ],
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Container(
-                padding: const EdgeInsets.all(8),
-                decoration: BoxDecoration(
-                  color: Colors.teal.shade50,
-                  borderRadius: BorderRadius.circular(10),
-                ),
-                child: const Icon(Icons.auto_awesome, color: Colors.teal, size: 22),
-              ),
-              const SizedBox(width: 12),
-              const Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      "No Routines Yet",
-                      style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: Colors.black87),
-                    ),
-                    Text(
-                      "Ready to begin your training?",
-                      style: TextStyle(color: Colors.grey, fontSize: 12),
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 12),
-          Text(
-            "Let FitLoop AI generate a personalized routine tailored to your $goal goal ($level level).",
-            style: TextStyle(color: Colors.grey.shade700, fontSize: 13, height: 1.3),
-          ),
-          const SizedBox(height: 16),
-          SizedBox(
-            width: double.infinity,
-            height: 48,
-            child: ElevatedButton.icon(
-              onPressed: () => _generateAiPlan(
-                goal,
-                level,
-                targetCategory: _selectedCategory != "All" ? _selectedCategory : null,
-              ),
-              icon: const Icon(Icons.auto_awesome, size: 20),
-              label: Text(
-                _selectedCategory != "All" ? "Generate $_selectedCategory Plan" : "Generate Workout Plan",
-                style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15),
-              ),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: Colors.teal,
-                foregroundColor: Colors.white,
-                elevation: 2,
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
+
 
   Widget _buildEmptyRoutinesList(String category, String goal, String level) {
     return Container(

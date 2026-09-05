@@ -24,6 +24,7 @@ class ScanFoodCacheService {
     String imageHash, {
     String dietPreference = 'Standard',
     List<String> allergies = const [],
+    String? correctedFoodName,
   }) {
     final cleanDiet = dietPreference.trim().toLowerCase();
     final cleanAllergies = allergies
@@ -33,22 +34,31 @@ class ScanFoodCacheService {
       ..sort();
     final allergyKey = cleanAllergies.join(',');
     final personalizationKey = '${cleanDiet}_$allergyKey';
-    return '$_cachePrefix${imageHash}_v${currentAnalysisVersion}_$personalizationKey';
+    final corrKey = (correctedFoodName != null && correctedFoodName.trim().isNotEmpty)
+        ? '_corr_${correctedFoodName.trim().toLowerCase().replaceAll(RegExp(r'[^a-z0-9]+'), '_')}'
+        : '';
+    return '$_cachePrefix$imageHash${corrKey}_v${currentAnalysisVersion}_$personalizationKey';
   }
 
   /// Retrieves a previously cached analysis result for this exact image hash, schema version,
-  /// and dietary personalization profile.
+  /// dietary personalization profile, and optional corrected food name.
   /// Returns null if not cached, expired, or corrupted.
   Future<Map<String, dynamic>?> getCachedAnalysis(
     String imageHash, {
     String dietPreference = 'Standard',
     List<String> allergies = const [],
+    String? correctedFoodName,
   }) async {
     if (imageHash.isEmpty) return null;
 
     try {
       final prefs = await SharedPreferences.getInstance();
-      final key = _buildCacheKey(imageHash, dietPreference: dietPreference, allergies: allergies);
+      final key = _buildCacheKey(
+        imageHash,
+        dietPreference: dietPreference,
+        allergies: allergies,
+        correctedFoodName: correctedFoodName,
+      );
       final rawJson = prefs.getString(key);
 
       if (rawJson == null || rawJson.isEmpty) {
@@ -65,7 +75,7 @@ class ScanFoodCacheService {
 
       final dynamic data = decoded['analysisData'];
       if (data is Map<String, dynamic>) {
-        debugPrint("[ScanFoodCache] Cache HIT for image $imageHash (v$currentAnalysisVersion, diet: $dietPreference)");
+        debugPrint("[ScanFoodCache] Cache HIT for image $imageHash (v$currentAnalysisVersion, diet: $dietPreference, corr: $correctedFoodName)");
         return Map<String, dynamic>.from(data);
       }
     } catch (e) {
@@ -74,47 +84,61 @@ class ScanFoodCacheService {
     return null;
   }
 
-  /// Persists a completed analysis result to local device storage keyed by image hash and personalization.
+  /// Persists a completed analysis result to local device storage keyed by image hash, personalization,
+  /// and optional corrected food name.
   Future<void> saveAnalysis(
     String imageHash,
     Map<String, dynamic> analysisData, {
     String dietPreference = 'Standard',
     List<String> allergies = const [],
+    String? correctedFoodName,
   }) async {
     if (imageHash.isEmpty || analysisData.isEmpty) return;
 
     try {
       final prefs = await SharedPreferences.getInstance();
-      final key = _buildCacheKey(imageHash, dietPreference: dietPreference, allergies: allergies);
+      final key = _buildCacheKey(
+        imageHash,
+        dietPreference: dietPreference,
+        allergies: allergies,
+        correctedFoodName: correctedFoodName,
+      );
       final payload = {
         'imageHash': imageHash,
         'version': currentAnalysisVersion,
         'dietPreference': dietPreference,
         'allergies': allergies,
+        'correctedFoodName': correctedFoodName,
         'analyzedAt': DateTime.now().toIso8601String(),
         'analysisData': analysisData,
       };
 
       await prefs.setString(key, json.encode(payload));
-      debugPrint("[ScanFoodCache] Cache SAVED for image $imageHash (v$currentAnalysisVersion, diet: $dietPreference)");
+      debugPrint("[ScanFoodCache] Cache SAVED for image $imageHash (v$currentAnalysisVersion, diet: $dietPreference, corr: $correctedFoodName)");
     } catch (e) {
       debugPrint("[ScanFoodCache] Error writing cache for $imageHash: $e");
     }
   }
 
-  /// Removes cached analysis for a specific image hash and profile (used when user requests "Re-run AI Analysis").
+  /// Removes cached analysis for a specific image hash, profile, and optional corrected food name.
   Future<void> removeCachedAnalysis(
     String imageHash, {
     String dietPreference = 'Standard',
     List<String> allergies = const [],
+    String? correctedFoodName,
   }) async {
     if (imageHash.isEmpty) return;
 
     try {
       final prefs = await SharedPreferences.getInstance();
-      final key = _buildCacheKey(imageHash, dietPreference: dietPreference, allergies: allergies);
+      final key = _buildCacheKey(
+        imageHash,
+        dietPreference: dietPreference,
+        allergies: allergies,
+        correctedFoodName: correctedFoodName,
+      );
       await prefs.remove(key);
-      debugPrint("[ScanFoodCache] Cache CLEARED for image $imageHash (diet: $dietPreference)");
+      debugPrint("[ScanFoodCache] Cache CLEARED for image $imageHash (diet: $dietPreference, corr: $correctedFoodName)");
     } catch (e) {
       debugPrint("[ScanFoodCache] Error clearing cache for $imageHash: $e");
     }

@@ -1,7 +1,10 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
+import '../models/health_models.dart';
 import '../models/workout_models.dart';
+import '../services/health_integration_service.dart';
+import '../services/unified_activity_summary_service.dart';
 import '../widgets/workout/analytics_summary_cards.dart';
 import '../widgets/workout/visual_strength_charts.dart';
 import '../widgets/workout/workout_history_list_card.dart';
@@ -17,17 +20,74 @@ class _WorkoutAnalyticsScreenState extends State<WorkoutAnalyticsScreen>
     with SingleTickerProviderStateMixin {
   late TabController _tabController;
   String _selectedDateRange = '30 Days'; // '7 Days', '30 Days', 'All Time'
+  List<ExternalWorkoutSession> _externalWorkouts = [];
+  bool _isLoadingExternal = false;
 
   @override
   void initState() {
     super.initState();
     _tabController = TabController(length: 2, vsync: this);
+    _loadExternalWorkouts();
+  }
+
+  Future<void> _loadExternalWorkouts() async {
+    if (_isLoadingExternal) return;
+    if (mounted) setState(() => _isLoadingExternal = true);
+    try {
+      final now = DateTime.now();
+      DateTime start;
+      if (_selectedDateRange == '7 Days') {
+        start = DateTime(now.year, now.month, now.day).subtract(const Duration(days: 7));
+      } else if (_selectedDateRange == '30 Days') {
+        start = DateTime(now.year, now.month, now.day).subtract(const Duration(days: 30));
+      } else {
+        // Past 90 days for All Time
+        start = DateTime(now.year, now.month, now.day).subtract(const Duration(days: 90));
+      }
+
+      final ext = await HealthIntegrationService.instance.getExternalWorkoutsForDateRange(start, now);
+      if (mounted) {
+        setState(() {
+          _externalWorkouts = ext;
+          _isLoadingExternal = false;
+        });
+      }
+    } catch (_) {
+      if (mounted) setState(() => _isLoadingExternal = false);
+    }
   }
 
   @override
   void dispose() {
     _tabController.dispose();
     super.dispose();
+  }
+
+  List<WorkoutHistorySession> _mergeWithExternal(List<WorkoutHistorySession> firestoreSessions) {
+    if (_externalWorkouts.isEmpty) return firestoreSessions;
+
+    final fitLoopMaps = firestoreSessions.map((s) => {
+      'id': s.id,
+      'title': s.routineName,
+      'category': s.category,
+      'startTime': s.date,
+      'endTime': s.date.add(Duration(minutes: s.durationMinutes)),
+      'durationMinutes': s.durationMinutes,
+      'caloriesBurned': s.caloriesBurned,
+      'totalVolumeKg': s.totalVolumeKg,
+      'totalSets': s.totalSets,
+      'exercises': s.exercises.map((e) => e.toMap()).toList(),
+      'prBadges': s.prBadges,
+    }).toList();
+
+    final unified = UnifiedActivitySummaryService.instance.deduplicateSessions(
+      fitLoopWorkouts: fitLoopMaps,
+      externalWorkouts: _externalWorkouts,
+    );
+
+    final mergedList = unified.map((u) => u.toWorkoutHistorySession()).toList();
+    mergedList.sort((a, b) => b.date.compareTo(a.date));
+    return mergedList;
   }
 
   List<WorkoutHistorySession> _filterSessionsByDate(List<WorkoutHistorySession> allSessions) {
@@ -145,7 +205,8 @@ class _WorkoutAnalyticsScreenState extends State<WorkoutAnalyticsScreen>
         }).toList()
           ..sort((a, b) => b.date.compareTo(a.date)); // Descending chronological order
 
-        final filteredSessions = _filterSessionsByDate(allSessions);
+        final mergedSessions = _mergeWithExternal(allSessions);
+        final filteredSessions = _filterSessionsByDate(mergedSessions);
         final summary = _calculateSummary(filteredSessions);
 
         return Scaffold(
@@ -158,6 +219,19 @@ class _WorkoutAnalyticsScreenState extends State<WorkoutAnalyticsScreen>
             backgroundColor: Colors.white,
             elevation: 0,
             centerTitle: false,
+            actions: [
+              IconButton(
+                icon: _isLoadingExternal
+                    ? const SizedBox(
+                        width: 18,
+                        height: 18,
+                        child: CircularProgressIndicator(strokeWidth: 2, color: Colors.teal),
+                      )
+                    : const Icon(Icons.sync_rounded, color: Colors.teal),
+                tooltip: "Sync Health Data",
+                onPressed: _loadExternalWorkouts,
+              ),
+            ],
             bottom: TabBar(
               controller: _tabController,
               indicatorColor: Colors.teal,
@@ -206,7 +280,10 @@ class _WorkoutAnalyticsScreenState extends State<WorkoutAnalyticsScreen>
                             backgroundColor: Colors.grey.shade100,
                             visualDensity: VisualDensity.compact,
                             onSelected: (val) {
-                              if (val) setState(() => _selectedDateRange = range);
+                              if (val) {
+                                setState(() => _selectedDateRange = range);
+                                _loadExternalWorkouts();
+                              }
                             },
                           ),
                         );

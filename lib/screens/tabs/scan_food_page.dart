@@ -188,6 +188,9 @@ class _CameraTabState extends State<CameraTab>
       initialAnalysis: sanitizedAnalysis,
       initialMealName: draft.mealName,
       isCached: true,
+      imageHash: draft.imageHash,
+      dietPreference: dietPreference,
+      allergies: allergies,
       onEditsChanged: (edits) {
         ScanDraftService.instance.saveDraft(
           imageHash: draft.imageHash,
@@ -375,6 +378,11 @@ class _CameraTabState extends State<CameraTab>
           initialAnalysis: analysisData,
           initialMealName: defaultMealName,
           isCached: isCached,
+          imageHash: imageHash,
+          userGoal: userGoal,
+          calorieTarget: calorieTarget,
+          dietPreference: dietPreference,
+          allergies: allergies,
           onEditsChanged: (edits) {
             ScanDraftService.instance.saveDraft(
               imageHash: imageHash,

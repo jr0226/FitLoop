@@ -1,5 +1,7 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/foundation.dart';
+import 'health_integration_service.dart';
+import 'unified_activity_summary_service.dart';
 
 /// Service responsible for calculating and streaming daily FitLoop workout calories.
 ///
@@ -11,37 +13,26 @@ class DailyWorkoutSummaryService {
   /// Parses the completion date from a workout log record.
   /// Checks `completedAt` first, falling back to legacy `timestamp` or `createdAt`.
   static DateTime? parseWorkoutDate(Map<String, dynamic> data) {
-    // 1. Preferred field: completedAt
-    final completed = data['completedAt'];
-    if (completed is Timestamp) return completed.toDate();
-    if (completed is String) {
-      final parsed = DateTime.tryParse(completed);
-      if (parsed != null) return parsed.toLocal();
-    }
-    if (completed is int) {
-      return DateTime.fromMillisecondsSinceEpoch(completed).toLocal();
-    }
-
-    // 2. Fallback field: timestamp
-    final ts = data['timestamp'];
-    if (ts is Timestamp) return ts.toDate();
-    if (ts is String) {
-      final parsed = DateTime.tryParse(ts);
-      if (parsed != null) return parsed.toLocal();
-    }
-    if (ts is int) {
-      return DateTime.fromMillisecondsSinceEpoch(ts).toLocal();
+    DateTime? checkValue(dynamic val) {
+      if (val == null) return null;
+      if (val is DateTime) return val;
+      if (val is Timestamp) return val.toDate();
+      if (val is String) {
+        final parsed = DateTime.tryParse(val);
+        if (parsed != null) return parsed.toLocal();
+      }
+      if (val is int) {
+        return DateTime.fromMillisecondsSinceEpoch(val).toLocal();
+      }
+      return null;
     }
 
-    // 3. Fallback field: createdAt
-    final createdAt = data['createdAt'];
-    if (createdAt is Timestamp) return createdAt.toDate();
-    if (createdAt is String) {
-      final parsed = DateTime.tryParse(createdAt);
-      if (parsed != null) return parsed.toLocal();
-    }
-
-    return null;
+    return checkValue(data['completedAt']) ??
+        checkValue(data['timestamp']) ??
+        checkValue(data['createdAt']) ??
+        checkValue(data['startTime']) ??
+        checkValue(data['startedAt']) ??
+        checkValue(data['date']);
   }
 
   /// Extracts calories burned from a workout log record.
@@ -107,5 +98,23 @@ class DailyWorkoutSummaryService {
           debugPrint('[DailyWorkoutSummaryService] Error streaming workout logs: $error');
           return 0;
         });
+  }
+
+  /// Real-time stream of unified daily exercise calories (FitLoop + Health Connect deduplicated).
+  ///
+  /// Combines FitLoop workouts and Android Health Connect exercise sessions
+  /// using [UnifiedActivitySummaryService].
+  static Stream<int> streamDailyUnifiedExerciseCalories(
+    String uid,
+    DateTime targetDate, {
+    FirebaseFirestore? firestore,
+    HealthIntegrationService? healthService,
+  }) {
+    return UnifiedActivitySummaryService.streamDailyActivitySummary(
+      uid,
+      targetDate,
+      firestore: firestore,
+      healthService: healthService,
+    ).map((summary) => summary.totalExerciseCalories);
   }
 }

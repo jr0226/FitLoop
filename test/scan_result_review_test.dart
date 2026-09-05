@@ -83,12 +83,12 @@ void main() {
     expect(find.text("500"), findsOneWidget);
     expect(find.text("Fried Egg"), findsNothing);
 
-    // Rename Chicken Rice to Roasted Chicken Rice
+    // Rename Chicken Rice to Roasted Chicken Rice via food correction dialog
     await tester.tap(find.byIcon(Icons.edit_outlined).first);
     await tester.pumpAndSettle();
-    expect(find.text("Rename Item"), findsOneWidget);
+    expect(find.text("Correct Food Item"), findsOneWidget);
     await tester.enterText(find.byType(TextField).last, "Roasted Chicken Rice");
-    await tester.tap(find.text("Update"));
+    await tester.tap(find.text("Keep Name Only"));
     await tester.pumpAndSettle();
 
     expect(find.text("Roasted Chicken Rice"), findsWidgets);

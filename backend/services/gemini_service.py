@@ -161,6 +161,122 @@ def build_food_analysis_prompt(
     return "\n".join(prompt_lines)
 
 
+def build_food_recalculation_prompt(
+    corrected_food_name: str,
+    previous_serving_grams: Optional[float] = None,
+    user_goal: str = "Maintenance",
+    calorie_target: Optional[int] = None,
+    diet_preference: str = "Standard",
+    allergies: Optional[List[str]] = None,
+) -> str:
+    """
+    Constructs an authoritative recalculation prompt for Gemini AI when the user corrects the food identity.
+    Treats the user-corrected food name as authoritative and instructs the AI strictly to estimate
+    visible portion and recalculate macronutrients and calories without re-identifying or overriding the name.
+    """
+    clean_name = (corrected_food_name or "Food").strip()
+    clean_goal = (user_goal or "Maintenance").strip()
+    clean_diet = (diet_preference or "Standard").strip()
+    clean_allergies = [a.strip() for a in (allergies or []) if a and a.strip()]
+
+    prompt_lines = [
+        "You are an elite AI sports nutritionist, dietary specialist, and expert culinary analyst.",
+        "",
+        "CRITICAL HUMAN-IN-THE-LOOP CORRECTION MANDATE:",
+        f"1. AUTHORITATIVE FOOD IDENTITY: The user has corrected the food identity to: '{clean_name}'.",
+        f"2. DO NOT RE-IDENTIFY OR OVERRIDE: Treat the corrected food name '{clean_name}' as absolute, authoritative truth. Do NOT re-identify the food from scratch. Do NOT return 'Actually this looks like something else'. Do NOT override the food name.",
+        f"3. VISUAL PORTION RECALCULATION ONLY: Use the original image solely to estimate the visible portion size (volume/grams) and calculate the accurate nutritional values (calories, protein, carbs, fat, fiber, sodium) specifically for '{clean_name}'.",
+    ]
+
+    if previous_serving_grams and previous_serving_grams > 0:
+        prompt_lines.append(
+            f"4. PREVIOUS SERVING BENCHMARK: The previous detected serving was approximately {int(previous_serving_grams)}g. Use this as a reference point alongside visible visual evidence in the image."
+        )
+    else:
+        prompt_lines.append(
+            "4. PORTION ESTIMATION: Estimate portion sizes conservatively in 'estimatedServingGrams' based on standard realistic human portions visible in the image. If visual confidence is low, provide a cautious estimate rather than inventing precision."
+        )
+
+    prompt_lines.extend([
+        "5. PRIMARY FOOD ITEM: The primary item in the 'foods' array MUST be named exactly:",
+        f'   "{clean_name}"',
+        "   If the dish has separate visible sides (e.g. White Rice, Soup, Salad), you may include them as separate items, but the main dish or corrected element MUST be named precisely as specified by the user.",
+        "",
+        "USER PROFILE & CONTEXT:",
+        f"- Fitness Goal: {clean_goal}",
+    ])
+
+    if calorie_target and calorie_target > 0:
+        prompt_lines.append(f"- Daily Calorie Target: {calorie_target} kcal")
+
+    prompt_lines.append(f"- Dietary Preference: {clean_diet}")
+
+    if clean_allergies:
+        prompt_lines.append(f"- Allergies & Intolerances: {', '.join(clean_allergies)}")
+    else:
+        prompt_lines.append("- Allergies & Intolerances: None reported")
+
+    prompt_lines.extend([
+        "",
+        "PERSONALIZATION GUIDELINES:",
+        f"1. Score Reasoning: Evaluate nutritional balance and macro ratios of '{clean_name}' specifically against the user's '{clean_goal}' goal (0-100 scale). Tailor the 'explanation' to comment on this alignment.",
+    ])
+
+    diet_lower = clean_diet.lower()
+    if diet_lower in ("vegetarian", "vegan", "pescatarian", "halal"):
+        if diet_lower == "vegetarian":
+            prompt_lines.append(
+                f"2. Dietary Restrictions: User follows a '{clean_diet}' diet. NEVER recommend alternatives containing meat/poultry/fish. Suggestions MUST be plant-based, egg, or dairy."
+            )
+        elif diet_lower == "vegan":
+            prompt_lines.append(
+                f"2. Dietary Restrictions: User follows a '{clean_diet}' diet. NEVER recommend alternatives containing animal products (no meat, fish, poultry, dairy, eggs, honey). All suggestions in BOTH 'explanation' and 'alternatives' MUST be 100% plant-based."
+            )
+        elif diet_lower == "pescatarian":
+            prompt_lines.append(
+                f"2. Dietary Restrictions: User follows a '{clean_diet}' diet. Suggestions may include fish/seafood, but no poultry or red meat."
+            )
+        elif diet_lower == "halal":
+            prompt_lines.append(
+                f"2. Dietary Restrictions: User follows a '{clean_diet}' diet. NEVER recommend alternatives containing pork, lard, or alcohol."
+            )
+    elif diet_lower != "standard":
+        prompt_lines.append(
+            f"2. Dietary Restrictions: User follows a '{clean_diet}' diet. NEVER recommend alternatives containing ingredients prohibited under this diet."
+        )
+
+    if clean_allergies:
+        prompt_lines.append(
+            f"3. Allergy Safety: User is allergic to: {', '.join(clean_allergies)}. STRICTLY DO NOT suggest any meals or alternatives containing these allergens."
+        )
+
+    prompt_lines.extend([
+        "",
+        "Return ONLY a valid JSON object matching this exact structure (no markdown backticks, no explanatory text outside the JSON):",
+        "{",
+        '  "foods": [',
+        '    {',
+        f'      "name": "{clean_name}",',
+        '      "estimatedServingGrams": 250,',
+        '      "calories": 450,',
+        '      "proteins": 25,',
+        '      "carbs": 50,',
+        '      "fats": 12',
+        '    }',
+        "  ],",
+        '  "totalCalories": 450,',
+        '  "totalProteins": 25,',
+        '  "totalCarbs": 50,',
+        '  "totalFats": 12,',
+        '  "score": 85,',
+        f'  "explanation": "Nutritional recalculation for {clean_name} tailored to your goal.",',
+        '  "alternatives": ["Healthier recommendation 1", "Healthier recommendation 2"]',
+        "}",
+    ])
+
+    return "\n".join(prompt_lines)
+
+
 def sanitize_food_alternatives(
     alternatives: List[str],
     diet_preference: str = "Standard",
@@ -525,13 +641,22 @@ def build_workout_recommendation_prompt(
 
     # Category composition rules
     prompt_lines.extend([
-        "4. CATEGORY COMPOSITION REQUIREMENTS:",
-        "   - Cardio: Focus on aerobic conditioning, stamina, or cardiovascular intervals. Prescribe 3-6 exercises (e.g. Jumping Jacks, High Knees, Mountain Climbers, Burpees, Jump Rope, Air Bike, Marching in place). Use duration for sets/reps (e.g. '3 sets x 45s' or '3 rounds x 60 seconds') and provide 'durationSeconds'.",
-        "   - Core: Focus on core stability, abdominals, obliques, and lower back. Prescribe 3-6 exercises (e.g. Forearm Plank, Dead Bug, Bird Dog, Bicycle Crunches, Russian Twists, Leg Raises). Category MUST be 'Core' and target muscle 'Core' or 'Abs'.",
-        "   - Full Body: Must NOT be an isolated muscle group. Combine a balanced compound sequence: 1) Lower body (squat/lunge), 2) Upper push (push-up/press), 3) Upper pull (row/pulldown), 4) Core (plank/dead bug), 5) Conditioning (burpee/jumping jacks). Prescribe 4-6 exercises. Category MUST be 'Full Body'.",
-        "   - Strength / Upper Body / Lower Body / HIIT: Provide standard targeted compound & isolation exercises (3-6 exercises).",
+        "4. CATEGORY COMPOSITION REQUIREMENTS (STRICT CORRECTNESS MANDATE):",
+        "   - Cardio: CRITICAL RULE -> When target category is Cardio, NEVER output resistance/strength exercises (ABSOLUTELY NO push-ups, no dumbbell rows, no bench press, no bicep curls, no tricep extensions, no shoulder presses, no squats, no deadlifts). Output ONLY true cardiovascular/conditioning movements (e.g. Jumping Jacks, High Knees, Mountain Climbers, Burpees, Jump Rope, Air Bike, Running in Place, Cycling). Every exercise MUST have 'durationSeconds' > 0 and use timed sets (e.g. '3 sets x 45s').",
+        "   - Core: Focus exclusively on core stability, abdominals, obliques, and lower back. Prescribe 3-6 exercises (e.g. Forearm Plank, Dead Bug, Bird Dog, Bicycle Crunches, Russian Twists, Leg Raises). Category MUST be 'Core' and target muscle 'Core' or 'Abs'.",
+        "   - Chest: Pectoral-dominant movements only (e.g. Push-Ups, Bench Press, Chest Fly, Dips).",
+        "   - Back: Lats, traps, upper back movements only (e.g. Rows, Lat Pulldowns, Pull-Ups, Supermans).",
+        "   - Arms: Biceps and triceps movements only (e.g. Curls, Tricep Extensions, Dips).",
+        "   - Shoulders: Deltoid-focused movements only (e.g. Overhead Press, Lateral Raises, Pike Push-Ups).",
+        "   - Legs: Lower body movements only (e.g. Squats, Lunges, RDL, Glute Bridges, Calf Raises).",
+        "   - Push: Chest + Shoulders + Triceps only.",
+        "   - Pull: Back + Biceps + Rear Delts only.",
+        "   - Upper Body: Chest, Back, Shoulders, and Arms only. No pure leg movements.",
+        "   - Lower Body: Quads, Hamstrings, Glutes, and Calves only. No pure upper body pressing/pulling.",
+        "   - Full Body: Must NOT be an isolated muscle group. Must include balanced coverage: 1) Lower body (squat/lunge), 2) Upper push (push-up/press), 3) Upper pull (row/pulldown), 4) Core (plank/dead bug).",
+        "   - HIIT: Interval conditioning movements (Burpees, Mountain Climbers, Jump Squats, Jumping Jacks, High Knees).",
         "",
-        "5. EXERCISE COUNT MANDATE: Each routine MUST contain 3 to 6 exercises. NEVER return an empty exercises array (\"exercises\": []).",
+        "5. EXERCISE COUNT & UNIQUENESS MANDATE: Each routine MUST contain 3 to 6 exercises. NEVER return an empty exercises array (\"exercises\": []). All exercise names within a routine MUST be unique; do not output aliases of the same movement.",
     ])
 
     # Recent History rule
@@ -742,6 +867,193 @@ async def analyze_food_image(
         )
 
 
+async def recalculate_food_nutrition(
+    image_bytes: bytes,
+    corrected_food_name: str,
+    previous_serving_grams: Optional[float] = None,
+    user_goal: str = "Maintenance",
+    calorie_target: Optional[int] = None,
+    diet_preference: str = "Standard",
+    allergies: Optional[List[str]] = None,
+) -> Dict[str, Any]:
+    """
+    Recalculates food nutrition and visible portion size given a user-corrected food identity and the original image.
+    Enforces the authoritative user-corrected food name and recalculates calories, macronutrients, and dietary checks.
+    """
+    _check_api_key()
+
+    if not image_bytes or len(image_bytes) == 0:
+        raise HTTPException(status_code=400, detail="No image data provided for recalculation.")
+
+    clean_corrected_name = (corrected_food_name or "Food").strip()
+    if not clean_corrected_name:
+        raise HTTPException(status_code=400, detail="A valid corrected food name must be provided.")
+
+    prompt = build_food_recalculation_prompt(
+        corrected_food_name=clean_corrected_name,
+        previous_serving_grams=previous_serving_grams,
+        user_goal=user_goal,
+        calorie_target=calorie_target,
+        diet_preference=diet_preference,
+        allergies=allergies,
+    )
+
+    max_attempts = 3
+    backoff_delays = [1.0, 2.0, 4.0]
+    raw_text = ""
+    last_error: Optional[Exception] = None
+
+    for attempt in range(1, max_attempts + 1):
+        try:
+            logger.info(
+                f"Gemini AI food recalculation attempt {attempt}/{max_attempts} "
+                f"for '{clean_corrected_name}' (model: {GEMINI_MODEL}, thinking_level: LOW)"
+            )
+
+            if _HAS_GENAI_SDK:
+                client = genai.Client(api_key=GEMINI_API_KEY)
+                config = types.GenerateContentConfig(
+                    temperature=0.2,
+                    response_mime_type="application/json",
+                    thinking_config=types.ThinkingConfig(
+                        thinking_level=types.ThinkingLevel.LOW,
+                    ),
+                )
+                response = client.models.generate_content(
+                    model=GEMINI_MODEL,
+                    contents=[
+                        types.Part.from_bytes(data=image_bytes, mime_type="image/jpeg"),
+                        prompt,
+                    ],
+                    config=config,
+                )
+                raw_text = response.text or ""
+            else:
+                url = f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent?key={GEMINI_API_KEY}"
+                payload = {
+                    "contents": [
+                        {
+                            "parts": [
+                                {"text": prompt},
+                                {
+                                    "inlineData": {
+                                        "mimeType": "image/jpeg",
+                                        "data": base64.b64encode(image_bytes).decode("utf-8")
+                                    }
+                                }
+                            ]
+                        }
+                    ],
+                    "generationConfig": {
+                        "temperature": 0.2,
+                        "responseMimeType": "application/json",
+                        "thinkingConfig": {
+                            "thinkingLevel": "LOW",
+                        },
+                    }
+                }
+                async with httpx.AsyncClient(timeout=35.0) as client:
+                    res = await client.post(url, json=payload)
+                    if res.status_code == 200:
+                        data = res.json()
+                        raw_text = data["candidates"][0]["content"]["parts"][0]["text"]
+                    elif res.status_code == 503:
+                        raise HTTPException(status_code=503, detail="Gemini service 503 unavailable.")
+                    else:
+                        raise HTTPException(status_code=res.status_code, detail=f"Gemini API returned error code {res.status_code}.")
+
+            if raw_text and raw_text.strip():
+                break
+
+        except HTTPException as http_exc:
+            if http_exc.status_code in (400, 500):
+                raise
+            last_error = http_exc
+        except Exception as err:
+            last_error = err
+            if not _is_transient_error(err):
+                logger.error(f"Non-retryable Gemini error on recalculation attempt {attempt}: {err}")
+                raise HTTPException(status_code=502, detail=f"Failed to communicate with Gemini AI: {str(err)}")
+
+        if attempt < max_attempts:
+            delay = backoff_delays[attempt - 1]
+            logger.warning(f"Gemini AI temporary 503 error during recalculation on attempt {attempt}/{max_attempts}. Retrying in {delay}s...")
+            await asyncio.sleep(delay)
+        else:
+            logger.error(f"Gemini AI recalculation all {max_attempts} attempts failed: {last_error}")
+            raise HTTPException(
+                status_code=503,
+                detail="AI service is temporarily busy. Please try again shortly."
+            )
+
+    if not raw_text or not raw_text.strip():
+        raise HTTPException(status_code=503, detail="AI service is temporarily busy. Please try again shortly.")
+
+    try:
+        clean_text = raw_text.strip()
+        start = clean_text.find("{")
+        end = clean_text.rfind("}")
+        if start == -1 or end == -1:
+            raise ValueError("No JSON object found in AI response.")
+
+        json_str = clean_text[start:end + 1]
+        parsed_result = json.loads(json_str)
+
+        if isinstance(parsed_result, dict):
+            foods = parsed_result.get("foods", [])
+            # PRESERVE FACTUAL USER CORRECTION:
+            # Enforce that the user-corrected food identity is preserved as the primary food name
+            if isinstance(foods, list) and len(foods) > 0:
+                if isinstance(foods[0], dict):
+                    foods[0]["name"] = clean_corrected_name
+            else:
+                parsed_result["foods"] = [{
+                    "name": clean_corrected_name,
+                    "estimatedServingGrams": previous_serving_grams or 200,
+                    "calories": parsed_result.get("totalCalories", 300),
+                    "proteins": parsed_result.get("totalProteins", 15),
+                    "carbs": parsed_result.get("totalCarbs", 40),
+                    "fats": parsed_result.get("totalFats", 10),
+                }]
+
+            if "explanation" in parsed_result:
+                parsed_result["explanation"] = sanitize_recommendation_text(
+                    str(parsed_result.get("explanation", "")),
+                    diet_preference=diet_preference,
+                    allergies=allergies,
+                )
+            if "scoreExplanation" in parsed_result:
+                parsed_result["scoreExplanation"] = sanitize_recommendation_text(
+                    str(parsed_result.get("scoreExplanation", "")),
+                    diet_preference=diet_preference,
+                    allergies=allergies,
+                )
+            if "alternatives" in parsed_result:
+                parsed_result["alternatives"] = sanitize_food_alternatives(
+                    parsed_result.get("alternatives", []),
+                    diet_preference=diet_preference,
+                    allergies=allergies,
+                )
+
+            # Evaluate diet compatibility against the user-corrected food
+            compat_info = evaluate_food_diet_compatibility(
+                foods=parsed_result.get("foods", []),
+                diet_preference=diet_preference,
+                allergies=allergies,
+            )
+            parsed_result["dietCompatibility"] = compat_info["dietCompatibility"]
+            parsed_result["dietNotice"] = compat_info["dietNotice"]
+            parsed_result["allergyNotice"] = compat_info["allergyNotice"]
+
+        return parsed_result
+    except Exception as e:
+        logger.error(f"Failed to parse Gemini recalculation response as JSON: {e}. Raw text: {raw_text}")
+        raise HTTPException(
+            status_code=502,
+            detail="Gemini returned an invalid JSON response structure."
+        )
+
+
 def _is_equipment_compatible(ex_equipment: str, ex_name: str, allowed_equipment: Optional[List[str]]) -> bool:
     """
     Validates whether an exercise's required equipment is compatible with user's available equipment.
@@ -863,6 +1175,47 @@ def _repair_exercise_equipment(ex: Dict[str, Any], allowed_equipment: Optional[L
 
     logger.info(f"Repaired incompatible equipment in '{name}' -> '{ex_copy['name']}' ({ex_copy['equipment']})")
     return ex_copy
+
+
+def _is_cardio_exercise(name: str) -> bool:
+    """Returns True if the exercise is genuine cardio/conditioning."""
+    n = name.lower()
+    forbidden = [
+        "push-up", "push up", "pushup", "bench press", "chest press", "chest fly",
+        "row", "pulldown", "pull-up", "pull up", "chin-up", "bicep", "tricep",
+        "shoulder press", "military press", "lateral raise", "squat", "deadlift",
+        "lunge", "curl", "extension"
+    ]
+    if any(f in n for f in forbidden):
+        return False
+    cardio_keywords = [
+        "jack", "knee", "climber", "burpee", "run", "jog", "sprint", "bike",
+        "cycle", "jump rope", "skipping", "elliptical", "rower", "stair"
+    ]
+    return any(k in n for k in cardio_keywords)
+
+
+def _repair_category_exercise(ex: Dict[str, Any], category: str, index: int) -> Dict[str, Any]:
+    """Replaces an invalid category exercise with a guaranteed canonical exercise."""
+    cat = (category or "").lower()
+    if cat == "cardio":
+        cardio_pool = [
+            {"name": "Jumping Jacks", "category": "Cardio", "target": "Cardio", "sets": "3 sets x 45s", "durationSeconds": 45, "equipment": "Bodyweight", "desc": "Light on toes, steady rhythm."},
+            {"name": "High Knees", "category": "Cardio", "target": "Cardio", "sets": "3 sets x 30s", "durationSeconds": 30, "equipment": "Bodyweight", "desc": "Drive knees to chest height."},
+            {"name": "Mountain Climbers", "category": "Cardio", "target": "Cardio", "sets": "3 sets x 40s", "durationSeconds": 40, "equipment": "Bodyweight", "desc": "Alternate knees swiftly in plank."},
+            {"name": "Jump Rope", "category": "Cardio", "target": "Cardio", "sets": "3 sets x 60s", "durationSeconds": 60, "equipment": "Bodyweight", "desc": "Light skips on the balls of your feet."},
+            {"name": "Burpees", "category": "Cardio", "target": "Cardio", "sets": "3 sets x 30s", "durationSeconds": 30, "equipment": "Bodyweight", "desc": "Full body conditioning cycle."},
+        ]
+        return cardio_pool[index % len(cardio_pool)]
+    elif cat == "core":
+        core_pool = [
+            {"name": "Forearm Plank", "category": "Core", "target": "Core", "sets": "3 sets x 45s", "durationSeconds": 45, "equipment": "Bodyweight", "desc": "Keep elbows under shoulders and glutes engaged."},
+            {"name": "Dead Bug", "category": "Core", "target": "Core", "sets": "3 sets x 12 reps", "equipment": "Bodyweight", "desc": "Lower opposite limbs with flat lower back."},
+            {"name": "Bicycle Crunches", "category": "Core", "target": "Core", "sets": "3 sets x 20 reps", "equipment": "Bodyweight", "desc": "Rotate torso bringing elbow to opposite knee."},
+            {"name": "Russian Twists", "category": "Core", "target": "Core", "sets": "3 sets x 20 reps", "equipment": "Bodyweight", "desc": "Rotate side to side with core braced."},
+        ]
+        return core_pool[index % len(core_pool)]
+    return ex
 
 
 async def generate_workout_recommendations(
@@ -1000,11 +1353,26 @@ async def generate_workout_recommendations(
         r["fitnessLevel"] = difficulty.title()
         r["fitnessGoal"] = user_goal.title()
 
-        # Validate and repair equipment compatibility
+        # Validate and repair category & equipment compatibility
         repaired_exercises = []
-        for ex in clean_exercises:
+        for idx, ex in enumerate(clean_exercises):
             ex_eq = ex.get("equipment") or "Bodyweight"
             ex_name = ex.get("name") or ex.get("exerciseName") or ""
+
+            # Check category compatibility (e.g. Cardio must not contain resistance exercises)
+            if norm_req_cat and norm_req_cat.lower() == "cardio":
+                if not _is_cardio_exercise(ex_name):
+                    ex = _repair_category_exercise(ex, "cardio", idx)
+                    ex_eq = ex.get("equipment") or "Bodyweight"
+                    ex_name = ex.get("name") or ""
+            elif norm_req_cat and norm_req_cat.lower() == "core":
+                ex_target = (ex.get("target") or ex.get("category") or "").lower()
+                if not any(k in ex_name.lower() or k in ex_target for k in ["plank", "dead bug", "twist", "crunch", "core", "abs", "waist"]):
+                    ex = _repair_category_exercise(ex, "core", idx)
+                    ex_eq = ex.get("equipment") or "Bodyweight"
+                    ex_name = ex.get("name") or ""
+
+            # Check equipment compatibility
             if _is_equipment_compatible(ex_eq, ex_name, equipment):
                 repaired_exercises.append(ex)
             else:

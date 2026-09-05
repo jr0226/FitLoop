@@ -3,7 +3,7 @@ from typing import List, Optional, Any, Dict
 from fastapi import APIRouter, File, Form, UploadFile, HTTPException, Query
 from pydantic import BaseModel, Field
 
-from services.gemini_service import analyze_food_image
+from services.gemini_service import analyze_food_image, recalculate_food_nutrition
 from services.malaysian_food_service import MalaysianFoodService
 
 logger = logging.getLogger(__name__)
@@ -129,6 +129,94 @@ async def analyze_food(
     except Exception as enrich_err:
         logger.error(f"Error enriching food analysis with Malaysian DB: {enrich_err}", exc_info=True)
         # Fall back to raw Gemini result if database lookup encounters an unexpected failure
+        return gemini_result
+
+
+@router.post("/ai/recalculate-food", response_model=FoodAnalysisResponse)
+@router.post("/food/recalculate", response_model=FoodAnalysisResponse)
+async def recalculate_food(
+    file: UploadFile = File(..., description="Original food image file"),
+    corrected_food_name: str = Form(..., description="Authoritative user-corrected food name (e.g. Fish Rice)"),
+    previous_serving_grams: Optional[float] = Form(None, description="Previous estimated serving grams benchmark"),
+    user_goal: Optional[str] = Form("Maintenance", description="User's fitness goal"),
+    calorie_target: Optional[int] = Form(None, description="User's calorie target"),
+    diet_preference: Optional[str] = Form("Standard", description="User's diet preference"),
+    allergies: Optional[str] = Form(None, description="User's allergies"),
+):
+    """
+    Recalculates nutrition for a food image based on an authoritative user correction.
+    Gemini uses the original image strictly to estimate visible portions, calories, and macros
+    without re-identifying or overriding the food name.
+    Cross-references Malaysian Food DB and enforces dietary/allergy safety checks.
+    """
+    if not file or not file.filename:
+        raise HTTPException(status_code=400, detail="No image file provided.")
+
+    clean_corrected_name = (corrected_food_name or "").strip()
+    if not clean_corrected_name:
+        raise HTTPException(status_code=400, detail="Corrected food name cannot be empty.")
+
+    content_type = (file.content_type or "").lower().strip()
+    if content_type and content_type not in ALLOWED_IMAGE_TYPES:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unsupported image format '{content_type}'. Please upload a JPEG, PNG, or WEBP image.",
+        )
+
+    try:
+        image_bytes = await file.read()
+    except Exception as read_err:
+        logger.error(f"Failed to read uploaded image file: {read_err}")
+        raise HTTPException(status_code=400, detail="Failed to process uploaded image file.")
+
+    if not image_bytes or len(image_bytes) == 0:
+        raise HTTPException(status_code=400, detail="Uploaded image file is empty.")
+
+    if len(image_bytes) > MAX_IMAGE_SIZE_BYTES:
+        raise HTTPException(status_code=400, detail="Image file exceeds maximum allowable size (15MB).")
+
+    clean_goal = (user_goal or "Maintenance").strip()
+    clean_diet = (diet_preference or "Standard").strip()
+
+    parsed_allergies: List[str] = []
+    if allergies and str(allergies).strip():
+        raw_allergy_str = str(allergies).strip()
+        if raw_allergy_str.startswith("[") and raw_allergy_str.endswith("]"):
+            try:
+                import json
+                loaded = json.loads(raw_allergy_str)
+                if isinstance(loaded, list):
+                    parsed_allergies = [str(x).strip() for x in loaded if str(x).strip()]
+            except Exception:
+                parsed_allergies = [a.strip() for a in raw_allergy_str.strip("[]").replace('"', '').replace("'", "").split(",") if a.strip()]
+        else:
+            parsed_allergies = [a.strip() for a in raw_allergy_str.split(",") if a.strip()]
+
+    logger.info(
+        f"Received food recalculation request for '{clean_corrected_name}': {file.filename} ({len(image_bytes)} bytes), "
+        f"prevGrams: {previous_serving_grams}, diet: '{clean_diet}', allergies: {parsed_allergies}"
+    )
+
+    # 1. Authoritative Recalculation via Gemini
+    gemini_result = await recalculate_food_nutrition(
+        image_bytes=image_bytes,
+        corrected_food_name=clean_corrected_name,
+        previous_serving_grams=previous_serving_grams,
+        user_goal=clean_goal,
+        calorie_target=calorie_target,
+        diet_preference=clean_diet,
+        allergies=parsed_allergies,
+    )
+
+    # 2. Authoritative Malaysian Food Database Enrichment
+    try:
+        enriched_result = MalaysianFoodService.enrich_gemini_analysis(gemini_result)
+        # Ensure the user's authoritative food name was not altered by enrichment
+        if enriched_result.get("foods") and len(enriched_result["foods"]) > 0:
+            enriched_result["foods"][0]["name"] = clean_corrected_name
+        return enriched_result
+    except Exception as enrich_err:
+        logger.error(f"Error enriching recalculated food analysis with Malaysian DB: {enrich_err}", exc_info=True)
         return gemini_result
 
 

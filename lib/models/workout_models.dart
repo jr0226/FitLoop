@@ -689,6 +689,22 @@ class CompletedSetLog {
     required this.reps,
     this.isPersonalRecord = false,
   });
+
+  Map<String, dynamic> toMap() => {
+    'setNumber': setNumber,
+    'weightKg': weightKg,
+    'reps': reps,
+    'isPersonalRecord': isPersonalRecord,
+  };
+
+  factory CompletedSetLog.fromMap(Map<String, dynamic> map) {
+    return CompletedSetLog(
+      setNumber: (map['setNumber'] as num?)?.toInt() ?? 1,
+      weightKg: (map['weightKg'] as num?)?.toDouble() ?? 0.0,
+      reps: (map['reps'] as num?)?.toInt() ?? 10,
+      isPersonalRecord: (map['isPersonalRecord'] ?? map['isPR'] ?? false) == true,
+    );
+  }
 }
 
 class CompletedExerciseLog {
@@ -705,25 +721,59 @@ class CompletedExerciseLog {
   });
 
   double get totalVolume => sets.fold(0.0, (acc, s) => acc + (s.weightKg * s.reps));
+
+  Map<String, dynamic> toMap() => {
+    'exerciseName': exerciseName,
+    'targetMuscle': targetMuscle,
+    'hasPersonalRecord': hasPersonalRecord,
+    'sets': sets.map((s) => s.toMap()).toList(),
+  };
+
+  factory CompletedExerciseLog.fromMap(Map<String, dynamic> map) {
+    final rawSets = map['sets'] is List ? map['sets'] as List : [];
+    return CompletedExerciseLog(
+      exerciseName: (map['exerciseName'] ?? map['name'] ?? 'Exercise').toString(),
+      targetMuscle: (map['targetMuscle'] ?? map['target'] ?? 'General').toString(),
+      hasPersonalRecord: (map['hasPersonalRecord'] ?? false) == true,
+      sets: rawSets.map((s) {
+        if (s is Map) {
+          return CompletedSetLog.fromMap(Map<String, dynamic>.from(s));
+        }
+        return const CompletedSetLog(setNumber: 1, weightKg: 0, reps: 10);
+      }).toList(),
+    );
+  }
 }
 
 class WorkoutHistorySession {
   final String id;
   final String routineName;
+  final String? category;
   final DateTime date;
   final int durationMinutes;
   final int caloriesBurned;
   final List<CompletedExerciseLog> exercises;
   final List<String> prBadges;
+  final bool isExternal;
+  final String? sourceName;
+  final double? distanceKm;
+  final bool isMerged;
+  final bool hasCalories;
 
   const WorkoutHistorySession({
     required this.id,
     required this.routineName,
+    this.category,
     required this.date,
     required this.durationMinutes,
     required this.caloriesBurned,
     required this.exercises,
     this.prBadges = const [],
+    this.isExternal = false,
+    this.sourceName,
+    this.distanceKm,
+    this.isMerged = false,
+    this.hasCalories = true,
   });
 
   int get totalSets => exercises.fold(0, (acc, ex) => acc + ex.sets.length);
