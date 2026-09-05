@@ -6,6 +6,7 @@ import '../config/app_config.dart';
 import '../models/malaysian_food.dart';
 
 class FoodService {
+  static const String cacheNamespace = 'myfcd_food_catalog_v3';
   static List<MalaysianFood>? _cachedFoods;
 
   /// Exposes currently cached Malaysian foods in memory.
@@ -17,21 +18,21 @@ class FoodService {
     _cachedFoods = foods;
   }
 
-  /// Fetches all Malaysian food records from the live backend API.
+  /// Fetches verified Malaysian food records from the live MyFCD v3 backend API.
   ///
-  /// Caches results in memory so subsequent searches/opens in the same app session
-  /// do NOT trigger additional network requests or Render cold starts.
+  /// Caches results in memory under `myfcd_food_catalog_v3` so subsequent opens
+  /// do NOT trigger extra network roundtrips.
   static Future<List<MalaysianFood>> fetchMalaysianFoods({
     bool forceRefresh = false,
     http.Client? client,
   }) async {
     if (_cachedFoods != null && _cachedFoods!.isNotEmpty && !forceRefresh) {
-      debugPrint('[FoodService] Returning ${_cachedFoods!.length} cached Malaysian foods.');
+      debugPrint('[FoodService] Returning ${_cachedFoods!.length} cached MyFCD foods ($cacheNamespace).');
       return _cachedFoods!;
     }
 
     final httpClient = client ?? http.Client();
-    final primaryUrl = Uri.parse('${AppConfig.apiBaseUrl}/api/v1/foods');
+    final primaryUrl = Uri.parse('${AppConfig.apiBaseUrl}/api/v3/foods?only_primary=true&limit=500');
 
     String? token;
     try {
@@ -47,10 +48,10 @@ class FoodService {
     };
 
     try {
-      debugPrint('[FoodService] Fetching Malaysian food database from $primaryUrl...');
+      debugPrint('[FoodService] Fetching official MyFCD v3 database from $primaryUrl...');
       final response = await httpClient.get(primaryUrl, headers: headers).timeout(
         const Duration(seconds: AppConfig.requestTimeoutSeconds),
-        onTimeout: () => throw Exception('Malaysian food database request timed out.'),
+        onTimeout: () => throw Exception('Official MyFCD database request timed out.'),
       );
 
       if (response.statusCode == 200) {
@@ -64,34 +65,30 @@ class FoodService {
             .toList();
 
         _cachedFoods = foods;
-        debugPrint('[FoodService] Successfully loaded and cached ${foods.length} Malaysian foods.');
+        debugPrint('[FoodService] Successfully loaded and cached ${foods.length} official MyFCD foods ($cacheNamespace).');
         return foods;
       } else {
         throw Exception('Backend returned status code ${response.statusCode}');
       }
     } catch (e) {
-      debugPrint('[FoodService] Primary endpoint failed: $e');
-      // If cached data already exists, gracefully return it
+      debugPrint('[FoodService] MyFCD v3 endpoint error: $e');
       if (_cachedFoods != null && _cachedFoods!.isNotEmpty) {
-        debugPrint('[FoodService] Falling back to previously cached ${_cachedFoods!.length} foods.');
+        debugPrint('[FoodService] Falling back to previously cached ${_cachedFoods!.length} MyFCD foods.');
         return _cachedFoods!;
       }
       rethrow;
     }
   }
 
-  /// Searches the loaded Malaysian food database locally with deterministic ranking.
-  ///
-  /// Ranking Order:
-  /// 1. Exact name match (case-insensitive)
-  /// 2. Starts-with name match
-  /// 3. Contains in English name
-  /// 4. Contains in Malay name (name_ms)
-  /// 5. Contains in category
+  /// Searches the loaded MyFCD database locally with deterministic ranking across:
+  /// 1. display_name / name
+  /// 2. official_name
+  /// 3. name_ms (Malay alias)
+  /// 4. category
   static List<MalaysianFood> searchLocalFoods(
     String query, {
     List<MalaysianFood>? dataset,
-    int limit = 30,
+    int limit = 50,
   }) {
     final list = dataset ?? _cachedFoods ?? [];
     final cleanQuery = query.trim().toLowerCase();
@@ -105,28 +102,32 @@ class FoodService {
     final List<MalaysianFood> containsNameMatches = [];
     final List<MalaysianFood> malayNameMatches = [];
     final List<MalaysianFood> categoryMatches = [];
-    final Set<int> seenIds = {};
+    final Set<String> seenKeys = {};
 
     for (final food in list) {
       final nameLower = food.name.toLowerCase();
+      final officialLower = food.officialName?.toLowerCase() ?? '';
       final msLower = food.nameMs.toLowerCase();
       final catLower = food.category.toLowerCase();
+      final key = '${food.sourceDatabase}_${food.sourceId}_${food.id}';
 
-      if (nameLower == cleanQuery) {
+      if (seenKeys.contains(key)) continue;
+
+      if (nameLower == cleanQuery || officialLower == cleanQuery) {
         exactMatches.add(food);
-        seenIds.add(food.id);
-      } else if (nameLower.startsWith(cleanQuery)) {
+        seenKeys.add(key);
+      } else if (nameLower.startsWith(cleanQuery) || officialLower.startsWith(cleanQuery)) {
         startsWithMatches.add(food);
-        seenIds.add(food.id);
-      } else if (nameLower.contains(cleanQuery)) {
+        seenKeys.add(key);
+      } else if (nameLower.contains(cleanQuery) || officialLower.contains(cleanQuery)) {
         containsNameMatches.add(food);
-        seenIds.add(food.id);
-      } else if (msLower.contains(cleanQuery)) {
+        seenKeys.add(key);
+      } else if (msLower.isNotEmpty && (msLower == cleanQuery || msLower.contains(cleanQuery))) {
         malayNameMatches.add(food);
-        seenIds.add(food.id);
+        seenKeys.add(key);
       } else if (catLower.contains(cleanQuery)) {
         categoryMatches.add(food);
-        seenIds.add(food.id);
+        seenKeys.add(key);
       }
     }
 
@@ -141,7 +142,7 @@ class FoodService {
     return ordered.take(limit).toList();
   }
 
-  /// Legacy search method kept for backward compatibility with existing tests.
+  /// Legacy search method kept for backward compatibility with existing unit tests.
   static Future<List<dynamic>> searchFood(String query) async {
     final cleanQuery = query.trim();
     if (cleanQuery.isEmpty) return [];
@@ -155,7 +156,7 @@ class FoodService {
         'protein': f.servingProtein,
         'carbs': f.servingCarbs,
         'fat': f.servingFat,
-        'serving': '${f.servingName} (${f.servingGrams.toInt()}g)',
+        'serving': f.servingSummary,
       }).toList();
     } catch (_) {
       return [];

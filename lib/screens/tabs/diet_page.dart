@@ -688,7 +688,7 @@ class _AddFoodPageState extends State<AddFoodPage> {
       if (!mounted) return;
       setState(() {
         _isLoading = false;
-        _errorMessage = "Unable to load the food database. Check your connection and try again.";
+        _errorMessage = "Official MyFCD database is temporarily unavailable. Check your connection and try again.";
       });
     }
   }
@@ -809,7 +809,7 @@ class _AddFoodPageState extends State<AddFoodPage> {
                             const SizedBox(width: 8),
                             Expanded(
                               child: Text(
-                                "Standard Serving: ${food.servingName} (${food.servingGrams.toInt()} g)",
+                                "Standard Serving: ${food.servingSummary}",
                                 style: TextStyle(
                                   fontWeight: FontWeight.w600,
                                   fontSize: 13,
@@ -817,6 +817,22 @@ class _AddFoodPageState extends State<AddFoodPage> {
                                 ),
                               ),
                             ),
+                            if (food.isOfficialMyFCD)
+                              Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                decoration: BoxDecoration(
+                                  color: Colors.teal.withValues(alpha: 0.15),
+                                  borderRadius: BorderRadius.circular(6),
+                                ),
+                                child: const Text(
+                                  "Official MyFCD",
+                                  style: TextStyle(
+                                    fontSize: 10,
+                                    fontWeight: FontWeight.bold,
+                                    color: Colors.teal,
+                                  ),
+                                ),
+                              ),
                           ],
                         ),
                       ),
@@ -828,7 +844,7 @@ class _AddFoodPageState extends State<AddFoodPage> {
                           Expanded(
                             child: _buildNutrientTile(
                               "Calories",
-                              "${food.servingCalories} kcal",
+                              food.displayCalories,
                               Colors.teal,
                               isPrimary: true,
                             ),
@@ -837,7 +853,7 @@ class _AddFoodPageState extends State<AddFoodPage> {
                           Expanded(
                             child: _buildNutrientTile(
                               "Protein",
-                              "${food.servingProtein} g",
+                              food.displayProtein,
                               Colors.purple,
                             ),
                           ),
@@ -845,7 +861,7 @@ class _AddFoodPageState extends State<AddFoodPage> {
                           Expanded(
                             child: _buildNutrientTile(
                               "Carbs",
-                              "${food.servingCarbs} g",
+                              food.displayCarbs,
                               Colors.orange,
                             ),
                           ),
@@ -853,7 +869,7 @@ class _AddFoodPageState extends State<AddFoodPage> {
                           Expanded(
                             child: _buildNutrientTile(
                               "Fat",
-                              "${food.servingFat} g",
+                              food.displayFat,
                               Colors.blue,
                             ),
                           ),
@@ -989,16 +1005,23 @@ class _AddFoodPageState extends State<AddFoodPage> {
           .collection('food_logs')
           .add({
             'name': food.name,
+            if (food.officialName != null) 'officialName': food.officialName,
             'mealType': mealType,
             'foods': [
               {
                 'name': food.name,
+                if (food.officialName != null) 'officialName': food.officialName,
                 'calories': food.servingCalories,
                 'protein': food.servingProtein,
                 'carbs': food.servingCarbs,
                 'fat': food.servingFat,
                 'servingGrams': food.servingGrams,
                 'servingName': food.servingName,
+                'servingAmount': food.servingAmount,
+                'servingUnit': food.servingUnit,
+                'basisType': food.basisType,
+                if (food.sourceId.isNotEmpty) 'myfcdIdentifier': food.sourceId,
+                if (food.sourceDatabase != null) 'sourceDatabase': food.sourceDatabase,
               },
             ],
             'calories': food.servingCalories,
@@ -1006,7 +1029,10 @@ class _AddFoodPageState extends State<AddFoodPage> {
             'carbs': food.servingCarbs,
             'fat': food.servingFat,
             'source': 'malaysian_database',
-            'nutritionSource': 'malaysian_database',
+            'nutritionSource': 'myfcd',
+            if (food.sourceDatabase != null) 'sourceDatabase': food.sourceDatabase,
+            if (food.sourceId.isNotEmpty) 'myfcdIdentifier': food.sourceId,
+            'basisType': food.basisType,
             'timestamp': Timestamp.fromDate(widget.selectedDate),
             'createdAt': FieldValue.serverTimestamp(),
           });
@@ -1135,16 +1161,25 @@ class _AddFoodPageState extends State<AddFoodPage> {
 
     if (_searchResults.isEmpty) {
       return Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(Icons.search_off_rounded, size: 56, color: theme.colorScheme.onSurfaceVariant),
-            const SizedBox(height: 12),
-            Text(
-              "No matching Malaysian food found.",
-              style: TextStyle(color: theme.colorScheme.onSurfaceVariant, fontSize: 15),
-            ),
-          ],
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 24.0),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(Icons.search_off_rounded, size: 56, color: theme.colorScheme.onSurfaceVariant),
+              const SizedBox(height: 12),
+              Text(
+                "No official MyFCD match found.",
+                style: TextStyle(color: theme.colorScheme.onSurface, fontSize: 16, fontWeight: FontWeight.bold),
+              ),
+              const SizedBox(height: 6),
+              Text(
+                "Only verified Ministry of Health (MyFCD) records are displayed.",
+                style: TextStyle(color: theme.colorScheme.onSurfaceVariant, fontSize: 13),
+                textAlign: TextAlign.center,
+              ),
+            ],
+          ),
         ),
       );
     }
@@ -1186,15 +1221,40 @@ class _AddFoodPageState extends State<AddFoodPage> {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text(
-                          food.name,
-                          style: TextStyle(
-                            fontWeight: FontWeight.bold,
-                            fontSize: 14,
-                            color: theme.colorScheme.onSurface,
-                          ),
-                          maxLines: 2,
-                          overflow: TextOverflow.ellipsis,
+                        Row(
+                          children: [
+                            Expanded(
+                              child: Text(
+                                food.name,
+                                style: TextStyle(
+                                  fontWeight: FontWeight.bold,
+                                  fontSize: 14,
+                                  color: theme.colorScheme.onSurface,
+                                ),
+                                maxLines: 2,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ),
+                            if (food.isOfficialMyFCD) ...[
+                              const SizedBox(width: 6),
+                              Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                decoration: BoxDecoration(
+                                  color: Colors.teal.withValues(alpha: 0.12),
+                                  borderRadius: BorderRadius.circular(6),
+                                  border: Border.all(color: Colors.teal.withValues(alpha: 0.3)),
+                                ),
+                                child: const Text(
+                                  "Official MyFCD",
+                                  style: TextStyle(
+                                    fontSize: 10,
+                                    fontWeight: FontWeight.w600,
+                                    color: Colors.teal,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ],
                         ),
                         if (food.nameMs.isNotEmpty && food.nameMs != food.name) ...[
                           const SizedBox(height: 1),
@@ -1211,7 +1271,7 @@ class _AddFoodPageState extends State<AddFoodPage> {
                         ],
                         const SizedBox(height: 4),
                         Text(
-                          "${food.servingName} • ${food.servingGrams.toInt()} g",
+                          food.servingSummary,
                           style: TextStyle(
                             fontSize: 12,
                             color: theme.colorScheme.onSurfaceVariant,
