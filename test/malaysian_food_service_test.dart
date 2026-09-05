@@ -168,13 +168,19 @@ void main() {
         officialName: 'RICE, COCONUT MILK (NASI LEMAK)',
         nameMs: 'Nasi Lemak',
         category: 'Cereal based',
+        normalizedCategory: 'Rice / Cereal dishes',
         caloriesKcal: 169.0,
         proteinG: 4.2,
         fatG: 5.7,
         carbsG: 25.3,
+        rawCaloriesKcal: 169.0,
+        rawProteinG: 4.2,
+        rawFatG: 5.7,
+        rawCarbsG: 25.3,
         servingName: '1 plate',
         servingAmount: 230.0,
         sourceDatabase: 'MyFCD 1997',
+        isSearchableForLogging: true,
       ),
       MalaysianFood(
         id: 2,
@@ -183,13 +189,19 @@ void main() {
         officialName: '(ROTI CANAI)',
         nameMs: 'Roti Canai',
         category: 'Cereal based',
+        normalizedCategory: 'Kuih / Snacks',
         caloriesKcal: 317.0,
         proteinG: 7.0,
         fatG: 10.8,
         carbsG: 47.9,
+        rawCaloriesKcal: 317.0,
+        rawProteinG: 7.0,
+        rawFatG: 10.8,
+        rawCarbsG: 47.9,
         servingName: '1 piece',
         servingAmount: 95.0,
         sourceDatabase: 'MyFCD 1997',
+        isSearchableForLogging: true,
       ),
       MalaysianFood(
         id: 3,
@@ -198,28 +210,78 @@ void main() {
         officialName: 'RICE, CHICKEN (NASI AYAM)',
         nameMs: 'Nasi Ayam',
         category: 'Cereal based',
+        normalizedCategory: 'Rice / Cereal dishes',
         caloriesKcal: 121.0,
         proteinG: 4.4,
         fatG: 2.7,
         carbsG: 19.8,
+        rawCaloriesKcal: 121.0,
+        rawProteinG: 4.4,
+        rawFatG: 2.7,
+        rawCarbsG: 19.8,
         servingName: '1 plate',
         servingAmount: 250.0,
         sourceDatabase: 'MyFCD 1997',
+        isSearchableForLogging: true,
       ),
       MalaysianFood(
         id: 4,
-        sourceId: '403004',
+        sourceId: '221010',
         name: 'Curry Laksa',
         officialName: 'CURRY LAKSA (KARI LAKSA)',
         nameMs: 'Kari Laksa',
-        category: 'Ready-to-eat meals',
+        category: 'Cereal based',
+        normalizedCategory: 'Noodles',
         caloriesKcal: 117.0,
         proteinG: 3.5,
         fatG: 6.4,
         carbsG: 11.3,
+        rawCaloriesKcal: 117.0,
+        rawProteinG: 3.5,
+        rawFatG: 6.4,
+        rawCarbsG: 11.3,
         servingName: '1 bowl',
         servingAmount: 650.0,
         sourceDatabase: 'MyFCD 1997',
+        isSearchableForLogging: true,
+      ),
+      // Analytical duplicate of Nasi Lemak (should be filtered out)
+      MalaysianFood(
+        id: 5,
+        sourceId: '403019',
+        name: 'Nasi Lemak',
+        officialName: 'NASI LEMAK',
+        nameMs: 'Nasi Lemak',
+        category: 'Cholesterol in ready-to-eat meals',
+        normalizedCategory: 'Rice / Cereal dishes',
+        caloriesKcal: 165.0,
+        proteinG: 4.8,
+        fatG: 3.6,
+        carbsG: 28.3,
+        rawCaloriesKcal: 165.0,
+        rawProteinG: 4.8,
+        rawFatG: 3.6,
+        rawCarbsG: 28.3,
+        sourceDatabase: 'MyFCD 1997',
+        isSearchableForLogging: false,
+      ),
+      // Incomplete nutrient assay record with null energy (should be filtered out)
+      MalaysianFood(
+        id: 6,
+        sourceId: '404019',
+        name: 'Nasi Lemak',
+        officialName: 'NASI LEMAK',
+        category: 'Fatty acids in ready-to-eat meals',
+        caloriesKcal: 0.0,
+        proteinG: 0.0,
+        fatG: 0.0,
+        carbsG: 0.0,
+        rawCaloriesKcal: null,
+        rawProteinG: null,
+        rawFatG: null,
+        rawCarbsG: null,
+        sourceDatabase: 'MyFCD 1997',
+        isSearchableForLogging: false,
       ),
     ];
 
@@ -227,13 +289,32 @@ void main() {
       FoodService.setCachedFoodsForTesting(null);
     });
 
-    test('searchLocalFoods ranks exact match first and searches official_name', () {
+    test('searchLocalFoods returns exactly 1 canonical Nasi Lemak and hides analytical duplicates', () {
       final results = FoodService.searchLocalFoods(
         'Nasi Lemak',
         dataset: sampleDataset,
       );
-      expect(results.isNotEmpty, isTrue);
-      expect(results.first.name, equals('Nasi Lemak'));
+      expect(results.length, equals(1));
+      expect(results.first.sourceId, equals('221019'));
+      expect(results.first.isSearchableForLogging, isTrue);
+    });
+
+    test('searchLocalFoods filters by normalizedCategory correctly', () {
+      final noodleResults = FoodService.searchLocalFoods(
+        '',
+        dataset: sampleDataset,
+        category: 'Noodles',
+      );
+      expect(noodleResults.length, equals(1));
+      expect(noodleResults.first.name, equals('Curry Laksa'));
+
+      final riceResults = FoodService.searchLocalFoods(
+        '',
+        dataset: sampleDataset,
+        category: 'Rice / Cereal dishes',
+      );
+      expect(riceResults.length, equals(2)); // Nasi Lemak + Chicken Rice
+      expect(riceResults.any((f) => f.sourceId == '403019'), isFalse);
     });
 
     test('searchLocalFoods matches Malay name cross-lingually (nasi ayam -> Chicken Rice)', () {
@@ -283,6 +364,7 @@ void main() {
       expect(requestedUri != null, isTrue);
       expect(requestedUri.toString(), contains('/api/v3/foods'));
       expect(requestedUri.toString(), contains('only_primary=true'));
+      expect(requestedUri.toString(), contains('only_searchable=true'));
       expect(requestedUri.toString(), isNot(contains('/api/v1/foods')));
     });
 

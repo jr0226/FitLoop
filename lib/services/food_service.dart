@@ -32,8 +32,6 @@ class FoodService {
     }
 
     final httpClient = client ?? http.Client();
-    final primaryUrl = Uri.parse('${AppConfig.apiBaseUrl}/api/v3/foods?only_primary=true&limit=500');
-
     String? token;
     try {
       final user = FirebaseAuth.instance.currentUser;
@@ -46,6 +44,9 @@ class FoodService {
       'Accept': 'application/json',
       if (token != null) 'Authorization': 'Bearer $token',
     };
+    final primaryUrl = Uri.parse(
+      '${AppConfig.apiBaseUrl}/api/v3/foods?only_searchable=true&only_primary=true&limit=500',
+    );
 
     try {
       debugPrint('[FoodService] Fetching official MyFCD v3 database from $primaryUrl...');
@@ -62,6 +63,7 @@ class FoodService {
 
         final foods = rawList
             .map((item) => MalaysianFood.fromJson(Map<String, dynamic>.from(item as Map)))
+            .where((f) => f.isValidForLogging)
             .toList();
 
         _cachedFoods = foods;
@@ -84,31 +86,47 @@ class FoodService {
   /// 1. display_name / name
   /// 2. official_name
   /// 3. name_ms (Malay alias)
-  /// 4. category
+  /// 4. category / normalizedCategory
   static List<MalaysianFood> searchLocalFoods(
     String query, {
     List<MalaysianFood>? dataset,
+    String? category,
     int limit = 50,
   }) {
     final list = dataset ?? _cachedFoods ?? [];
     final cleanQuery = query.trim().toLowerCase();
 
+    // Filter by category and validity
+    final filtered = list.where((food) {
+      if (!food.isValidForLogging) return false;
+      if (category != null && category != 'All' && category.isNotEmpty) {
+        final matchNorm = food.normalizedCategory?.toLowerCase() == category.toLowerCase();
+        final matchOrig = food.category.toLowerCase() == category.toLowerCase();
+        if (!matchNorm && !matchOrig) return false;
+      }
+      return true;
+    }).toList();
+
     if (cleanQuery.isEmpty) {
-      return list.take(limit).toList();
+      return filtered.take(limit).toList();
     }
 
     final List<MalaysianFood> exactMatches = [];
     final List<MalaysianFood> startsWithMatches = [];
     final List<MalaysianFood> containsNameMatches = [];
     final List<MalaysianFood> malayNameMatches = [];
+    final List<MalaysianFood> tokenMatches = [];
     final List<MalaysianFood> categoryMatches = [];
     final Set<String> seenKeys = {};
 
-    for (final food in list) {
+    final queryWords = cleanQuery.split(RegExp(r'\s+')).where((w) => w.isNotEmpty).toList();
+
+    for (final food in filtered) {
       final nameLower = food.name.toLowerCase();
       final officialLower = food.officialName?.toLowerCase() ?? '';
       final msLower = food.nameMs.toLowerCase();
       final catLower = food.category.toLowerCase();
+      final normCatLower = food.normalizedCategory?.toLowerCase() ?? '';
       final key = '${food.sourceDatabase}_${food.sourceId}_${food.id}';
 
       if (seenKeys.contains(key)) continue;
@@ -125,7 +143,15 @@ class FoodService {
       } else if (msLower.isNotEmpty && (msLower == cleanQuery || msLower.contains(cleanQuery))) {
         malayNameMatches.add(food);
         seenKeys.add(key);
-      } else if (catLower.contains(cleanQuery)) {
+      } else if (queryWords.length > 1 && queryWords.every((w) =>
+          nameLower.contains(w) ||
+          officialLower.contains(w) ||
+          msLower.contains(w) ||
+          catLower.contains(w) ||
+          normCatLower.contains(w))) {
+        tokenMatches.add(food);
+        seenKeys.add(key);
+      } else if (catLower.contains(cleanQuery) || normCatLower.contains(cleanQuery)) {
         categoryMatches.add(food);
         seenKeys.add(key);
       }
@@ -136,6 +162,7 @@ class FoodService {
       ...startsWithMatches,
       ...containsNameMatches,
       ...malayNameMatches,
+      ...tokenMatches,
       ...categoryMatches,
     ];
 

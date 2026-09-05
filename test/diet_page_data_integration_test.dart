@@ -17,8 +17,14 @@ void main() {
       proteinG: 4.0,
       fatG: 8.0,
       carbsG: 25.0,
+      // raw* fields must be non-null for isValidForLogging to pass
+      rawCaloriesKcal: 180.0,
+      rawProteinG: 4.0,
+      rawFatG: 8.0,
+      rawCarbsG: 25.0,
       servingName: '1 plate',
       servingGrams: 250.0,
+      isSearchableForLogging: true,
     ),
     const MalaysianFood(
       id: 29,
@@ -30,8 +36,14 @@ void main() {
       proteinG: 7.0,
       fatG: 15.0,
       carbsG: 35.0,
+      // raw* fields must be non-null for isValidForLogging to pass
+      rawCaloriesKcal: 300.0,
+      rawProteinG: 7.0,
+      rawFatG: 15.0,
+      rawCarbsG: 35.0,
       servingName: '1 piece',
       servingGrams: 95.0,
+      isSearchableForLogging: true,
     ),
   ];
 

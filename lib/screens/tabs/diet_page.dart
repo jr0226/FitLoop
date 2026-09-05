@@ -648,6 +648,21 @@ class _AddFoodPageState extends State<AddFoodPage> {
   List<MalaysianFood> _searchResults = [];
   bool _isLoading = true;
   String? _errorMessage;
+  String _selectedCategory = 'All';
+
+  static const List<String> _categories = [
+    'All',
+    'Rice / Cereal dishes',
+    'Noodles',
+    'Meat / Poultry',
+    'Fish / Seafood',
+    'Vegetables',
+    'Fruits',
+    'Beverages',
+    'Kuih / Snacks',
+    'Desserts',
+    'Others',
+  ];
 
   @override
   void initState() {
@@ -666,7 +681,22 @@ class _AddFoodPageState extends State<AddFoodPage> {
   void _onSearchChanged() {
     final query = _searchCtrl.text;
     setState(() {
-      _searchResults = FoodService.searchLocalFoods(query, dataset: _allFoods);
+      _searchResults = FoodService.searchLocalFoods(
+        query,
+        dataset: _allFoods,
+        category: _selectedCategory == 'All' ? null : _selectedCategory,
+      );
+    });
+  }
+
+  void _onCategorySelected(String cat) {
+    setState(() {
+      _selectedCategory = cat;
+      _searchResults = FoodService.searchLocalFoods(
+        _searchCtrl.text,
+        dataset: _allFoods,
+        category: cat == 'All' ? null : cat,
+      );
     });
   }
 
@@ -681,7 +711,11 @@ class _AddFoodPageState extends State<AddFoodPage> {
       if (!mounted) return;
       setState(() {
         _allFoods = foods;
-        _searchResults = FoodService.searchLocalFoods(_searchCtrl.text, dataset: foods);
+        _searchResults = FoodService.searchLocalFoods(
+          _searchCtrl.text,
+          dataset: foods,
+          category: _selectedCategory == 'All' ? null : _selectedCategory,
+        );
         _isLoading = false;
       });
     } catch (e) {
@@ -1101,6 +1135,40 @@ class _AddFoodPageState extends State<AddFoodPage> {
               ),
             ),
           ),
+
+          // Category Filter Chips
+          Container(
+            color: theme.cardColor,
+            height: 48,
+            child: ListView.separated(
+              padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 6.0),
+              scrollDirection: Axis.horizontal,
+              itemCount: _categories.length,
+              separatorBuilder: (context, index) => const SizedBox(width: 8),
+              itemBuilder: (context, index) {
+                final cat = _categories[index];
+                final isSelected = _selectedCategory == cat;
+                return ChoiceChip(
+                  label: Text(cat),
+                  selected: isSelected,
+                  onSelected: (selected) {
+                    if (selected) _onCategorySelected(cat);
+                  },
+                  selectedColor: theme.colorScheme.primary,
+                  labelStyle: TextStyle(
+                    fontSize: 12,
+                    fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+                    color: isSelected
+                        ? (theme.brightness == Brightness.dark ? Colors.black : Colors.white)
+                        : theme.colorScheme.onSurface,
+                  ),
+                  visualDensity: VisualDensity.compact,
+                );
+              },
+            ),
+          ),
+
+          const Divider(height: 1, thickness: 0.5),
 
           // Main Content States
           Expanded(

@@ -32,6 +32,8 @@ class MalaysianFood {
   final String? sourceUrl;
   final String? sourcePublishedDate;
   final String? sourceDatabase;
+  final bool isSearchableForLogging;
+  final String? normalizedCategory;
 
   /// Returns true if this record is verified from official MyFCD sources
   bool get isOfficialMyFCD =>
@@ -50,6 +52,17 @@ class MalaysianFood {
 
   /// Whether carbohydrates was analyzed and officially provided
   bool get hasCarbs => rawCarbsG != null;
+
+  /// Whether this food has sufficient core nutrition data and is valid for manual logging
+  bool get isValidForLogging {
+    if (!isSearchableForLogging) return false;
+    if (!hasEnergy) return false;
+    int validMacros = 0;
+    if (hasProtein) validMacros++;
+    if (hasFat) validMacros++;
+    if (hasCarbs) validMacros++;
+    return validMacros >= 2;
+  }
 
   /// Safe display of calories without fabricating zeros for unanalyzed nutrients
   String get displayCalories => hasEnergy ? '$servingCalories kcal' : 'Not available';
@@ -109,6 +122,8 @@ class MalaysianFood {
     this.sourceUrl,
     this.sourcePublishedDate,
     this.sourceDatabase,
+    this.isSearchableForLogging = true,
+    this.normalizedCategory,
   }) : servingAmount = servingAmount ?? servingGrams ?? 100.0;
 
   /// Multiplier to convert base density (100g or 100ml) to standard serving size.
@@ -176,6 +191,12 @@ class MalaysianFood {
         (json['carbsPer100g'] as num?)?.toDouble() ??
         (json['carbs'] as num?)?.toDouble();
 
+    final searchableRaw = json['is_searchable_for_logging'] ?? json['isSearchableForLogging'];
+    final isSearchable = searchableRaw == null
+        ? true
+        : (searchableRaw is bool ? searchableRaw : searchableRaw == 1 || searchableRaw.toString() == '1');
+    final normCat = json['normalized_category']?.toString() ?? json['normalizedCategory']?.toString();
+
     return MalaysianFood(
       id: (json['id'] as num?)?.toInt() ?? 0,
       sourceId: json['identifier']?.toString() ?? json['source_id']?.toString() ?? json['ndb_no']?.toString() ?? json['sourceId']?.toString() ?? '',
@@ -218,6 +239,8 @@ class MalaysianFood {
           json['source_published_date']?.toString() ??
           json['sourcePublishedDate']?.toString(),
       sourceDatabase: json['source_database']?.toString() ?? json['sourceDatabase']?.toString(),
+      isSearchableForLogging: isSearchable,
+      normalizedCategory: normCat,
     );
   }
 
@@ -247,6 +270,8 @@ class MalaysianFood {
       'source_url': sourceUrl,
       'source_published_date': sourcePublishedDate,
       'source_database': sourceDatabase,
+      'is_searchable_for_logging': isSearchableForLogging ? 1 : 0,
+      'normalized_category': normalizedCategory,
     };
   }
 }
