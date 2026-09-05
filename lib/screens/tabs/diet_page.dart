@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -644,11 +645,22 @@ class AddFoodPage extends StatefulWidget {
 
 class _AddFoodPageState extends State<AddFoodPage> {
   final TextEditingController _searchCtrl = TextEditingController();
-  List<MalaysianFood> _allFoods = [];
+  final ScrollController _scrollCtrl = ScrollController();
+
+  /// Browse results shown when query is empty (first page + load-more pages).
+  List<MalaysianFood> _browseResults = [];
+
+  /// Server search results (non-empty query).
   List<MalaysianFood> _searchResults = [];
+
   bool _isLoading = true;
+  bool _isSearching = false;   // true while a server search request is in flight
+  bool _isLoadingMore = false; // true while loading the next browse page
+  bool _hasMorePages = true;   // false once the backend returns < pageSize items
+  int _currentPage = 1;
   String? _errorMessage;
   String _selectedCategory = 'All';
+  Timer? _debounce;
 
   static const List<String> _categories = [
     'All',
@@ -668,54 +680,108 @@ class _AddFoodPageState extends State<AddFoodPage> {
   void initState() {
     super.initState();
     _searchCtrl.addListener(_onSearchChanged);
+    _scrollCtrl.addListener(_onScrollChanged);
     _loadFoods();
   }
 
   @override
   void dispose() {
+    _debounce?.cancel();
     _searchCtrl.removeListener(_onSearchChanged);
     _searchCtrl.dispose();
+    _scrollCtrl.removeListener(_onScrollChanged);
+    _scrollCtrl.dispose();
     super.dispose();
   }
 
+  /// Called when the search text changes. Debounces 350ms then fires a server search.
   void _onSearchChanged() {
-    final query = _searchCtrl.text;
-    setState(() {
-      _searchResults = FoodService.searchLocalFoods(
-        query,
-        dataset: _allFoods,
-        category: _selectedCategory == 'All' ? null : _selectedCategory,
-      );
+    _debounce?.cancel();
+    final query = _searchCtrl.text.trim();
+
+    if (query.isEmpty) {
+      // Back to browse mode — no server call needed, show cached first page
+      setState(() {
+        _searchResults = [];
+        _isSearching = false;
+      });
+      return;
+    }
+
+    _debounce = Timer(const Duration(milliseconds: 350), () {
+      _runServerSearch(query);
     });
   }
 
+  Future<void> _runServerSearch(String query) async {
+    if (!mounted) return;
+    setState(() => _isSearching = true);
+
+    final results = await FoodService.searchFoodsOnServer(
+      query,
+      category: _selectedCategory == 'All' ? null : _selectedCategory,
+    );
+
+    if (!mounted) return;
+    // Only apply results if the query hasn't changed since we fired the request
+    if (_searchCtrl.text.trim() == query) {
+      setState(() {
+        _searchResults = results;
+        _isSearching = false;
+      });
+    }
+  }
+
+  /// Handles scroll near the bottom — triggers loading the next browse page.
+  void _onScrollChanged() {
+    if (_searchCtrl.text.trim().isNotEmpty) return; // don't paginate during search
+    if (!_scrollCtrl.hasClients) return;
+    final distanceFromBottom =
+        _scrollCtrl.position.maxScrollExtent - _scrollCtrl.position.pixels;
+    if (distanceFromBottom < 200 && !_isLoadingMore && _hasMorePages) {
+      _loadMoreFoods();
+    }
+  }
+
+  /// Resets and reloads the browse list when a category chip is tapped.
   void _onCategorySelected(String cat) {
+    _debounce?.cancel();
     setState(() {
       _selectedCategory = cat;
-      _searchResults = FoodService.searchLocalFoods(
-        _searchCtrl.text,
-        dataset: _allFoods,
-        category: cat == 'All' ? null : cat,
-      );
+      _searchResults = [];
+      _browseResults = [];
+      _currentPage = 1;
+      _hasMorePages = true;
+      _isSearching = false;
     });
+
+    final query = _searchCtrl.text.trim();
+    if (query.isNotEmpty) {
+      _runServerSearch(query);
+    } else {
+      _loadFoods();
+    }
   }
 
+  /// Loads page 1 of browse results from the server.
   Future<void> _loadFoods({bool forceRefresh = false}) async {
     setState(() {
       _isLoading = true;
       _errorMessage = null;
+      _currentPage = 1;
+      _hasMorePages = true;
     });
 
     try {
-      final foods = await FoodService.fetchMalaysianFoods(forceRefresh: forceRefresh);
+      final foods = await FoodService.fetchMalaysianFoods(
+        forceRefresh: forceRefresh,
+        page: 1,
+        category: _selectedCategory == 'All' ? null : _selectedCategory,
+      );
       if (!mounted) return;
       setState(() {
-        _allFoods = foods;
-        _searchResults = FoodService.searchLocalFoods(
-          _searchCtrl.text,
-          dataset: foods,
-          category: _selectedCategory == 'All' ? null : _selectedCategory,
-        );
+        _browseResults = foods;
+        _hasMorePages = foods.length >= 100; // browsePageSize
         _isLoading = false;
       });
     } catch (e) {
@@ -724,6 +790,30 @@ class _AddFoodPageState extends State<AddFoodPage> {
         _isLoading = false;
         _errorMessage = "Official MyFCD database is temporarily unavailable. Check your connection and try again.";
       });
+    }
+  }
+
+  /// Loads the next page and appends to the browse list.
+  Future<void> _loadMoreFoods() async {
+    if (_isLoadingMore || !_hasMorePages) return;
+    setState(() => _isLoadingMore = true);
+
+    try {
+      final nextPage = _currentPage + 1;
+      final foods = await FoodService.fetchMalaysianFoods(
+        page: nextPage,
+        category: _selectedCategory == 'All' ? null : _selectedCategory,
+      );
+      if (!mounted) return;
+      setState(() {
+        _browseResults = [..._browseResults, ...foods];
+        _currentPage = nextPage;
+        _hasMorePages = foods.length >= 100;
+        _isLoadingMore = false;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _isLoadingMore = false);
     }
   }
 
@@ -1227,7 +1317,17 @@ class _AddFoodPageState extends State<AddFoodPage> {
       );
     }
 
-    if (_searchResults.isEmpty) {
+
+    // Decide which list and header to show
+    final bool isQueryMode = _searchCtrl.text.trim().isNotEmpty;
+    final List<MalaysianFood> displayList =
+        isQueryMode ? _searchResults : _browseResults;
+
+    if (isQueryMode && _isSearching) {
+      return const Center(child: CircularProgressIndicator());
+    }
+
+    if (displayList.isEmpty) {
       return Center(
         child: Padding(
           padding: const EdgeInsets.symmetric(horizontal: 24.0),
@@ -1237,7 +1337,9 @@ class _AddFoodPageState extends State<AddFoodPage> {
               Icon(Icons.search_off_rounded, size: 56, color: theme.colorScheme.onSurfaceVariant),
               const SizedBox(height: 12),
               Text(
-                "No official MyFCD match found.",
+                isQueryMode
+                    ? "No official MyFCD match found."
+                    : "No foods available in this category.",
                 style: TextStyle(color: theme.colorScheme.onSurface, fontSize: 16, fontWeight: FontWeight.bold),
               ),
               const SizedBox(height: 6),
@@ -1252,11 +1354,30 @@ class _AddFoodPageState extends State<AddFoodPage> {
       );
     }
 
+    // Total items = foods + optional load-more footer
+    final itemCount = displayList.length + (!isQueryMode && (_isLoadingMore || _hasMorePages) ? 1 : 0);
+
     return ListView.builder(
+      controller: _scrollCtrl,
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-      itemCount: _searchResults.length,
+      itemCount: itemCount,
       itemBuilder: (context, index) {
-        final food = _searchResults[index];
+        // Load-more footer
+        if (index == displayList.length) {
+          return Padding(
+            padding: const EdgeInsets.symmetric(vertical: 16),
+            child: Center(
+              child: _isLoadingMore
+                  ? const CircularProgressIndicator()
+                  : TextButton(
+                      onPressed: _loadMoreFoods,
+                      child: const Text("Load more foods"),
+                    ),
+            ),
+          );
+        }
+
+        final food = displayList[index];
         return Card(
           elevation: 0,
           margin: const EdgeInsets.only(bottom: 8),

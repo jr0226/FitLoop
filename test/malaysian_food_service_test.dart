@@ -365,6 +365,7 @@ void main() {
       expect(requestedUri.toString(), contains('/api/v3/foods'));
       expect(requestedUri.toString(), contains('only_primary=true'));
       expect(requestedUri.toString(), contains('only_searchable=true'));
+      expect(requestedUri.toString(), contains('limit=100')); // browse page size
       expect(requestedUri.toString(), isNot(contains('/api/v1/foods')));
     });
 
@@ -399,6 +400,90 @@ void main() {
       final secondLoad = await FoodService.fetchMalaysianFoods(client: mockClient);
       expect(secondLoad.length, equals(1));
       expect(httpCallsCount, equals(1));
+    });
+
+    test('searchFoodsOnServer sends GET /api/v3/foods?q=... and NEVER calls v1', () async {
+      Uri? requestedUri;
+      final mockClient = MockClient((request) async {
+        requestedUri = request.url;
+        return http.Response(
+          json.encode([
+            {
+              "identifier": "221019",
+              "official_name": "RICE, COCONUT MILK (NASI LEMAK)",
+              "display_name": "Nasi Lemak",
+              "category": "Cereal based",
+              "energy_kcal": 169.0,
+              "protein_g": 4.2,
+              "fat_g": 5.7,
+              "carbohydrate_g": 25.3,
+              "serving_label": "1 plate",
+              "serving_amount": 230.0,
+              "serving_unit": "g",
+              "source_database": "MyFCD 1997"
+            }
+          ]),
+          200,
+          headers: {'content-type': 'application/json'},
+        );
+      });
+
+      final results = await FoodService.searchFoodsOnServer('Nasi Lemak', client: mockClient);
+      expect(results.length, equals(1));
+      expect(results.first.name, equals('Nasi Lemak'));
+      expect(requestedUri != null, isTrue);
+      expect(requestedUri.toString(), contains('/api/v3/foods'));
+      expect(requestedUri.toString(), contains('q=Nasi'));
+      expect(requestedUri.toString(), contains('only_searchable=true'));
+      expect(requestedUri.toString(), contains('only_primary=true'));
+      expect(requestedUri.toString(), isNot(contains('/api/v1/foods')));
+    });
+
+    test('searchFoodsOnServer always sends a network request even when browse cache is populated', () async {
+      // Pre-populate the browse cache
+      FoodService.setCachedFoodsForTesting([
+        MalaysianFood(
+          id: 1,
+          sourceId: '221019',
+          name: 'Nasi Lemak',
+          category: 'Cereal based',
+          caloriesKcal: 169.0,
+          proteinG: 4.2,
+          fatG: 5.7,
+          carbsG: 25.3,
+          rawCaloriesKcal: 169.0,
+          rawProteinG: 4.2,
+          rawFatG: 5.7,
+          rawCarbsG: 25.3,
+          isSearchableForLogging: true,
+        ),
+      ]);
+
+      int networkCalls = 0;
+      final mockClient = MockClient((request) async {
+        networkCalls++;
+        return http.Response(
+          json.encode([
+            {
+              "identifier": "400001",
+              "display_name": "Mee Goreng",
+              "category": "Noodles",
+              "energy_kcal": 140.0,
+              "protein_g": 5.0,
+              "fat_g": 4.5,
+              "carbohydrate_g": 20.0,
+              "source_database": "MyFCD 1997"
+            }
+          ]),
+          200,
+          headers: {'content-type': 'application/json'},
+        );
+      });
+
+      // Server search must still hit the network, not use local cache
+      final results = await FoodService.searchFoodsOnServer('Mee Goreng', client: mockClient);
+      expect(networkCalls, equals(1)); // network was called
+      expect(results.first.name, equals('Mee Goreng')); // server result returned
     });
   });
 }

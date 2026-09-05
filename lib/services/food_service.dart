@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/foundation.dart';
@@ -7,9 +8,18 @@ import '../models/malaysian_food.dart';
 
 class FoodService {
   static const String cacheNamespace = 'myfcd_food_catalog_v3';
+
+  /// Browse-page cache: first 100 foods for the empty-query state.
+  /// This is NOT the full database — use [searchFoodsOnServer] for full search.
   static List<MalaysianFood>? _cachedFoods;
 
-  /// Exposes currently cached Malaysian foods in memory.
+  /// Page size for browse (no query) — keeps first-open fast.
+  static const int _browsePageSize = 100;
+
+  /// Page size for server-side search results.
+  static const int _searchPageSize = 50;
+
+  /// Exposes currently cached first-page foods (for browse / testing).
   static List<MalaysianFood>? get cachedFoods => _cachedFoods;
 
   /// Sets or clears in-memory cached foods for testing.
@@ -18,62 +28,105 @@ class FoodService {
     _cachedFoods = foods;
   }
 
-  /// Fetches verified Malaysian food records from the live MyFCD v3 backend API.
-  ///
-  /// Caches results in memory under `myfcd_food_catalog_v3` so subsequent opens
-  /// do NOT trigger extra network roundtrips.
-  static Future<List<MalaysianFood>> fetchMalaysianFoods({
-    bool forceRefresh = false,
-    http.Client? client,
-  }) async {
-    if (_cachedFoods != null && _cachedFoods!.isNotEmpty && !forceRefresh) {
-      debugPrint('[FoodService] Returning ${_cachedFoods!.length} cached MyFCD foods ($cacheNamespace).');
-      return _cachedFoods!;
-    }
+  /// Optional HTTP client injected by tests for server-side search calls.
+  static http.Client? _testSearchClient;
 
-    final httpClient = client ?? http.Client();
+  /// Injects a mock HTTP client for [searchFoodsOnServer] in tests.
+  @visibleForTesting
+  static void setSearchClientForTesting(http.Client? client) {
+    _testSearchClient = client;
+  }
+
+  // -------------------------------------------------------------------------
+  // Internal helpers
+  // -------------------------------------------------------------------------
+
+  static Future<Map<String, String>> _buildHeaders() async {
     String? token;
     try {
       final user = FirebaseAuth.instance.currentUser;
       token = await user?.getIdToken();
     } catch (_) {
-      // In tests or unauthenticated guest flows, proceed without auth token
+      // Tests / unauthenticated flows — proceed without token
     }
-
-    final headers = <String, String>{
+    return <String, String>{
       'Accept': 'application/json',
       if (token != null) 'Authorization': 'Bearer $token',
     };
-    final primaryUrl = Uri.parse(
-      '${AppConfig.apiBaseUrl}/api/v3/foods?only_searchable=true&only_primary=true&limit=500',
-    );
+  }
+
+  static List<MalaysianFood> _parseFoodList(http.Response response) {
+    final decoded = json.decode(response.body);
+    final List<dynamic> rawList = decoded is List
+        ? decoded
+        : (decoded['data'] ?? decoded['foods'] ?? []);
+    return rawList
+        .map((item) => MalaysianFood.fromJson(Map<String, dynamic>.from(item as Map)))
+        .where((f) => f.isValidForLogging)
+        .toList();
+  }
+
+  // -------------------------------------------------------------------------
+  // 1. Browse — paginated first-page fetch for the empty-query state
+  // -------------------------------------------------------------------------
+
+  /// Fetches a page of verified MyFCD v3 foods for browse display.
+  ///
+  /// Page 1 with no category is cached in memory. Subsequent pages or category
+  /// filters always hit the network.
+  ///
+  /// This is NOT a search — it only covers [_browsePageSize] records per page.
+  /// For search across the FULL 1,239-record database use [searchFoodsOnServer].
+  static Future<List<MalaysianFood>> fetchMalaysianFoods({
+    bool forceRefresh = false,
+    int page = 1,
+    String? category,
+    http.Client? client,
+  }) async {
+    // Return memory cache only for the default first-page browse
+    if (_cachedFoods != null &&
+        _cachedFoods!.isNotEmpty &&
+        !forceRefresh &&
+        page == 1 &&
+        category == null) {
+      debugPrint('[FoodService] Returning ${_cachedFoods!.length} cached MyFCD foods ($cacheNamespace).');
+      return _cachedFoods!;
+    }
+
+    final httpClient = client ?? http.Client();
+    final headers = await _buildHeaders();
+
+    final params = <String, String>{
+      'only_searchable': 'true',
+      'only_primary': 'true',
+      'limit': '$_browsePageSize',
+      'page': '$page',
+      if (category != null && category != 'All') 'normalized_category': category,
+    };
+    final uri = Uri.parse('${AppConfig.apiBaseUrl}/api/v3/foods')
+        .replace(queryParameters: params);
 
     try {
-      debugPrint('[FoodService] Fetching official MyFCD v3 database from $primaryUrl...');
-      final response = await httpClient.get(primaryUrl, headers: headers).timeout(
+      debugPrint('[FoodService] Fetching official MyFCD v3 database (page $page) from $uri...');
+      final response = await httpClient.get(uri, headers: headers).timeout(
         const Duration(seconds: AppConfig.requestTimeoutSeconds),
         onTimeout: () => throw Exception('Official MyFCD database request timed out.'),
       );
 
       if (response.statusCode == 200) {
-        final decoded = json.decode(response.body);
-        final List<dynamic> rawList = decoded is List
-            ? decoded
-            : (decoded['data'] ?? decoded['foods'] ?? []);
+        final foods = _parseFoodList(response);
 
-        final foods = rawList
-            .map((item) => MalaysianFood.fromJson(Map<String, dynamic>.from(item as Map)))
-            .where((f) => f.isValidForLogging)
-            .toList();
-
-        _cachedFoods = foods;
-        debugPrint('[FoodService] Successfully loaded and cached ${foods.length} official MyFCD foods ($cacheNamespace).');
+        // Cache only for first-page, no-category browse
+        if (page == 1 && category == null) {
+          _cachedFoods = foods;
+          debugPrint('[FoodService] Cached ${foods.length} official MyFCD foods ($cacheNamespace).');
+        }
         return foods;
       } else {
         throw Exception('Backend returned status code ${response.statusCode}');
       }
     } catch (e) {
-      debugPrint('[FoodService] MyFCD v3 endpoint error: $e');
+      debugPrint('[FoodService] MyFCD v3 browse error: $e');
       if (_cachedFoods != null && _cachedFoods!.isNotEmpty) {
         debugPrint('[FoodService] Falling back to previously cached ${_cachedFoods!.length} MyFCD foods.');
         return _cachedFoods!;
@@ -82,11 +135,77 @@ class FoodService {
     }
   }
 
-  /// Searches the loaded MyFCD database locally with deterministic ranking across:
-  /// 1. display_name / name
-  /// 2. official_name
-  /// 3. name_ms (Malay alias)
-  /// 4. category / normalizedCategory
+  // -------------------------------------------------------------------------
+  // 2. Server-side search — queries the FULL database, never the local cache
+  // -------------------------------------------------------------------------
+
+  /// Searches the FULL MyFCD v3 database on the server.
+  ///
+  /// Unlike [searchLocalFoods], this always sends a network request and can
+  /// match foods that were never downloaded to the device cache.
+  /// This is the authoritative search — it covers all 1,239 searchable records.
+  ///
+  /// Returns an empty list (not an exception) on network failure so the UI can
+  /// gracefully show "No results found".
+  static Future<List<MalaysianFood>> searchFoodsOnServer(
+    String query, {
+    String? category,
+    int limit = _searchPageSize,
+    http.Client? client,
+  }) async {
+    final cleanQuery = query.trim();
+    if (cleanQuery.isEmpty) return [];
+
+    final httpClient = client ?? _testSearchClient ?? http.Client();
+    final headers = await _buildHeaders();
+
+    final params = <String, String>{
+      'q': cleanQuery,
+      'only_searchable': 'true',
+      'only_primary': 'true',
+      'limit': '$limit',
+      if (category != null && category != 'All') 'normalized_category': category,
+    };
+    final uri = Uri.parse('${AppConfig.apiBaseUrl}/api/v3/foods')
+        .replace(queryParameters: params);
+
+    try {
+      debugPrint('[FoodService] Server search: $uri');
+      final response = await httpClient.get(uri, headers: headers).timeout(
+        const Duration(seconds: 15),
+        onTimeout: () => throw Exception('Search request timed out.'),
+      );
+
+      if (response.statusCode == 200) {
+        final foods = _parseFoodList(response);
+        debugPrint('[FoodService] Server search "$cleanQuery" → ${foods.length} results.');
+        return foods;
+      } else {
+        debugPrint('[FoodService] Server search returned ${response.statusCode}.');
+        return [];
+      }
+    } catch (e) {
+      debugPrint('[FoodService] Server search error: $e');
+      // Graceful fallback to local cache if network is unavailable
+      if (_cachedFoods != null && _cachedFoods!.isNotEmpty) {
+        debugPrint('[FoodService] Falling back to local cache search for "$cleanQuery".');
+        return searchLocalFoods(cleanQuery, dataset: _cachedFoods, category: category);
+      }
+      return [];
+    }
+  }
+
+  // -------------------------------------------------------------------------
+  // 3. Local search — operates on an explicit dataset (tests + offline fallback)
+  // -------------------------------------------------------------------------
+
+  /// Searches [dataset] (or the browse cache) locally with deterministic ranking.
+  ///
+  /// This should only be called with an explicit [dataset] from tests, or as an
+  /// offline fallback inside [searchFoodsOnServer]. Do NOT rely on this as the
+  /// primary search path — it only covers the first browse page, not the full DB.
+  ///
+  /// Ranking: exact → starts-with → contains → Malay name → token → category.
   static List<MalaysianFood> searchLocalFoods(
     String query, {
     List<MalaysianFood>? dataset,
@@ -169,14 +288,17 @@ class FoodService {
     return ordered.take(limit).toList();
   }
 
-  /// Legacy search method kept for backward compatibility with existing unit tests.
+  // -------------------------------------------------------------------------
+  // 4. Legacy compatibility
+  // -------------------------------------------------------------------------
+
+  /// Legacy search method kept for backward compatibility with existing callers.
   static Future<List<dynamic>> searchFood(String query) async {
     final cleanQuery = query.trim();
     if (cleanQuery.isEmpty) return [];
 
     try {
-      final foods = await fetchMalaysianFoods();
-      final matches = searchLocalFoods(cleanQuery, dataset: foods);
+      final matches = await searchFoodsOnServer(cleanQuery);
       return matches.map((f) => {
         'name': f.name,
         'calories': f.servingCalories,
