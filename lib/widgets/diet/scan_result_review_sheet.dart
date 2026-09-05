@@ -977,10 +977,10 @@ class _ScanResultReviewSheetState extends State<ScanResultReviewSheet> {
                     child: Row(
                       mainAxisAlignment: MainAxisAlignment.spaceAround,
                       children: [
-                        _buildMacroColumn("Calories", "$_totalCalories", "kcal", theme.colorScheme.primary),
-                        _buildMacroColumn("Protein", "${_totalProtein}g", "", Colors.blueAccent),
-                        _buildMacroColumn("Carbs", "${_totalCarbs}g", "", Colors.orangeAccent),
-                        _buildMacroColumn("Fat", "${_totalFat}g", "", Colors.redAccent),
+                        Expanded(child: _buildMacroColumn("Calories", "$_totalCalories", "kcal", theme.colorScheme.primary)),
+                        Expanded(child: _buildMacroColumn("Protein", "${_totalProtein}g", "", Colors.blueAccent)),
+                        Expanded(child: _buildMacroColumn("Carbs", "${_totalCarbs}g", "", Colors.orangeAccent)),
+                        Expanded(child: _buildMacroColumn("Fat", "${_totalFat}g", "", Colors.redAccent)),
                       ],
                     ),
                   ),
@@ -1012,15 +1012,18 @@ class _ScanResultReviewSheetState extends State<ScanResultReviewSheet> {
                   Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
-                      Text(
-                        "DETECTED FOODS (${_items.length})",
-                        style: TextStyle(
-                          fontSize: 12,
-                          fontWeight: FontWeight.bold,
-                          letterSpacing: 0.8,
-                          color: theme.colorScheme.onSurfaceVariant,
+                      Expanded(
+                        child: Text(
+                          "DETECTED FOODS (${_items.length})",
+                          style: TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.bold,
+                            letterSpacing: 0.8,
+                            color: theme.colorScheme.onSurfaceVariant,
+                          ),
                         ),
                       ),
+                      const SizedBox(width: 8),
                       Text(
                         "Tap item to edit",
                         style: TextStyle(fontSize: 11, color: theme.colorScheme.onSurfaceVariant),
@@ -1160,12 +1163,15 @@ class _ScanResultReviewSheetState extends State<ScanResultReviewSheet> {
                                     children: [
                                       Icon(Icons.auto_awesome, size: 11, color: Colors.teal.shade700),
                                       const SizedBox(width: 4),
-                                      Text(
-                                        "Updated after your correction",
-                                        style: TextStyle(
-                                          fontSize: 10,
-                                          fontWeight: FontWeight.bold,
-                                          color: Colors.teal.shade800,
+                                      Flexible(
+                                        child: Text(
+                                          "Updated after your correction",
+                                          style: TextStyle(
+                                            fontSize: 10,
+                                            fontWeight: FontWeight.bold,
+                                            color: Colors.teal.shade800,
+                                          ),
+                                          overflow: TextOverflow.ellipsis,
                                         ),
                                       ),
                                     ],
@@ -1400,32 +1406,39 @@ class _ScanResultReviewSheetState extends State<ScanResultReviewSheet> {
 
   Widget _buildMacroColumn(String label, String value, String unit, Color color) {
     return Column(
+      mainAxisSize: MainAxisSize.min,
       children: [
-        Text(
-          label.toUpperCase(),
-          style: TextStyle(
-            fontSize: 10,
-            fontWeight: FontWeight.bold,
-            color: Theme.of(context).colorScheme.onSurfaceVariant,
-            letterSpacing: 0.5,
+        FittedBox(
+          fit: BoxFit.scaleDown,
+          child: Text(
+            label.toUpperCase(),
+            style: TextStyle(
+              fontSize: 10,
+              fontWeight: FontWeight.bold,
+              color: Theme.of(context).colorScheme.onSurfaceVariant,
+              letterSpacing: 0.5,
+            ),
           ),
         ),
         const SizedBox(height: 2),
-        Row(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.baseline,
-          textBaseline: TextBaseline.alphabetic,
-          children: [
-            Text(
-              value,
-              style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: color),
-            ),
-            if (unit.isNotEmpty)
+        FittedBox(
+          fit: BoxFit.scaleDown,
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.baseline,
+            textBaseline: TextBaseline.alphabetic,
+            children: [
               Text(
-                " $unit",
-                style: TextStyle(fontSize: 10, color: color.withValues(alpha: 0.8)),
+                value,
+                style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: color),
               ),
-          ],
+              if (unit.isNotEmpty)
+                Text(
+                  " $unit",
+                  style: TextStyle(fontSize: 10, color: color.withValues(alpha: 0.8)),
+                ),
+            ],
+          ),
         ),
       ],
     );

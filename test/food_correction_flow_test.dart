@@ -570,8 +570,6 @@ void main() {
                 onPressed: () {
                   ScanResultReviewSheet.show(
                     context,
-                    imageBytes: validImageBytes,
-                    imageHash: 'test_hash_responsive_1',
                     initialAnalysis: initialAnalysis,
                     onSave: (_) async {},
                   );
@@ -584,10 +582,6 @@ void main() {
       );
 
       await tester.tap(find.text("Open Sheet"));
-      await tester.pumpAndSettle();
-
-      // Scroll ListView to bring food item into view on small 568h screen
-      await tester.drag(find.byType(ListView), const Offset(0, -200));
       await tester.pumpAndSettle();
 
       final editIcon = find.byIcon(Icons.edit_outlined).first;
@@ -608,8 +602,16 @@ void main() {
       await tester.enterText(find.byType(TextField).last, "Fish Rice");
       await tester.pumpAndSettle();
 
+      // Scroll Keep Name Only into view within the scrollable dialog
+      await tester.ensureVisible(find.text("Keep Name Only"));
+      await tester.pumpAndSettle();
+
       // Tap Keep Name Only
       await tester.tap(find.text("Keep Name Only"));
+      await tester.pumpAndSettle();
+
+      // Keyboard closes when dialog dismisses
+      tester.view.viewInsets = FakeViewPadding.zero;
       await tester.pumpAndSettle();
 
       expect(find.text("Fish Rice"), findsWidgets);
@@ -637,8 +639,6 @@ void main() {
                 onPressed: () {
                   ScanResultReviewSheet.show(
                     context,
-                    imageBytes: validImageBytes,
-                    imageHash: 'test_hash_responsive_2',
                     initialAnalysis: initialAnalysis,
                     onSave: (_) async {},
                   );
@@ -653,10 +653,8 @@ void main() {
       await tester.tap(find.text("Open Sheet"));
       await tester.pumpAndSettle();
 
-      await tester.drag(find.byType(ListView), const Offset(0, -200));
-      await tester.pumpAndSettle();
-
       final editIcon = find.byIcon(Icons.edit_outlined).first;
+      await tester.ensureVisible(editIcon);
       await tester.tap(editIcon);
       await tester.pumpAndSettle();
 
@@ -669,6 +667,7 @@ void main() {
       expect(find.text("Keep Name Only"), findsOneWidget);
       expect(find.text("Recalculate with AI"), findsOneWidget);
 
+      await tester.ensureVisible(find.text("Cancel"));
       await tester.tap(find.text("Cancel"));
       await tester.pumpAndSettle();
 
@@ -701,8 +700,6 @@ void main() {
                 onPressed: () {
                   ScanResultReviewSheet.show(
                     context,
-                    imageBytes: validImageBytes,
-                    imageHash: 'test_hash_responsive_3',
                     initialAnalysis: initialAnalysis,
                     onSave: (_) async {},
                   );
@@ -717,7 +714,8 @@ void main() {
       await tester.tap(find.text("Open Sheet"));
       await tester.pumpAndSettle();
 
-      await tester.drag(find.byType(ListView), const Offset(0, -200));
+      // Scroll sheet slightly to ensure food item card is above bottom action bar under 1.3x scale
+      await tester.drag(find.byType(ListView).first, const Offset(0, -200));
       await tester.pumpAndSettle();
 
       final editIcon = find.byIcon(Icons.edit_outlined).first;
@@ -734,6 +732,7 @@ void main() {
       expect(find.text("Recalculate with AI"), findsOneWidget);
 
       // Verify clicking actions works cleanly under 1.3x text scale
+      await tester.ensureVisible(find.text("Cancel"));
       await tester.tap(find.text("Cancel"));
       await tester.pumpAndSettle();
 
